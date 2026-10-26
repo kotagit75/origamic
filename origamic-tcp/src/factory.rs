@@ -2,6 +2,7 @@ use origamic_core::{
     factory::Factory, gossip::node::process_inbound_stream, overlay::message::GossipMessage,
 };
 use std::net::SocketAddr;
+use std::pin::Pin;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -30,29 +31,35 @@ impl Factory for TcpFactory {
     type Stream = TcpStream;
     type Address = SocketAddr;
 
-    async fn connect(&self, addr: Self::Address) -> std::io::Result<Self::Stream> {
-        Self::Stream::connect(addr).await
+    fn connect(
+        &self,
+        addr: Self::Address,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<Self::Stream>> + Send>>
+    {
+        Box::pin(async move { Self::Stream::connect(addr).await })
     }
 
-    async fn start_listener(
+    fn start_listener(
         &self,
         bind_addr: Option<Self::Address>,
         peer_tx: mpsc::Sender<GossipMessage>,
-    ) -> std::io::Result<()> {
+    ) -> Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>> {
         let target_addr = self.bind_addr.or(bind_addr);
-        let Some(addr) = target_addr else {
-            return Ok(());
-        };
-
-        let listener = TcpListener::bind(addr).await?;
-        tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let tx = peer_tx.clone();
+        if let Some(addr) = target_addr {
+            Box::pin(async move {
+                let listener = TcpListener::bind(addr).await?;
                 tokio::spawn(async move {
-                    let _ = process_inbound_stream(stream, tx).await;
+                    while let Ok((stream, _)) = listener.accept().await {
+                        let tx = peer_tx.clone();
+                        tokio::spawn(async move {
+                            let _ = process_inbound_stream(stream, tx).await;
+                        });
+                    }
                 });
-            }
-        });
-        Ok(())
+                Ok(())
+            })
+        } else {
+            Box::pin(async move { Ok(()) })
+        }
     }
 }

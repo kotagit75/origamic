@@ -2,12 +2,13 @@ use std::{
     io::{self, Write},
     net::SocketAddr,
     str::FromStr,
+    sync::Arc,
 };
 
 use origamic::{
     core::{
         factory::Factory,
-        overlay::{address::OverlayAddress, context::OverlayContext, factory::OverlayFactory},
+        overlay::{address::OverlayAddress, context::OverlayContext},
     },
     tcp::factory::TcpFactory,
 };
@@ -35,17 +36,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = OverlayContext::with_advertise(
         Uuid::from_str(&network_id_str.trim()).unwrap(),
-        TcpFactory::new(),
+        Arc::new(TcpFactory::new()),
         tcp_peers,
         listen_addr,
     );
 
     println!("Client Addr: {}", context.address());
 
-    let factory = OverlayFactory::new(context.clone());
-
     let server_addr: OverlayAddress = server_addr_str.trim().parse().unwrap();
-    let mut stream = factory.connect(server_addr).await.unwrap();
+    let mut stream = context.connect(server_addr).await.unwrap();
 
     println!("Enter messages to send:");
 

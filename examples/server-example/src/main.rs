@@ -1,9 +1,6 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
-use origamic::{
-    core::overlay::{context::OverlayContext, factory::OverlayFactory},
-    tcp::factory::TcpFactory,
-};
+use origamic::{core::overlay::context::OverlayContext, tcp::factory::TcpFactory};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
@@ -13,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = OverlayContext::with_advertise(
         uuid::Uuid::new_v4(),
-        TcpFactory::new(),
+        Arc::new(TcpFactory::new()),
         tcp_peers,
         listen_addr,
     );
@@ -21,8 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Network Id: {}", context.network_id());
     println!("Server Addr: {}", context.address());
 
-    let factory = OverlayFactory::new(context.clone());
-    let mut listener = factory.listen();
+    let mut listener = context.listen();
 
     loop {
         let (mut stream, addr) = listener.accept().await?;

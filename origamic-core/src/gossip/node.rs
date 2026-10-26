@@ -51,7 +51,7 @@ impl OutgoingLocalMessage {
     }
 }
 
-pub struct GossipNodeHandle<F: Factory> {
+pub struct GossipNodeHandle<F: ?Sized + Factory> {
     pub address: OverlayAddress,
     pub network_id: Uuid,
     pub local_tx: mpsc::Sender<OutgoingLocalMessage>,
@@ -60,10 +60,10 @@ pub struct GossipNodeHandle<F: Factory> {
     pub peer_store: PeerStore<F::Address>,
 }
 
-pub struct GossipNode<F: Factory> {
+pub struct GossipNode<F: ?Sized + Factory> {
     pub network_id: Uuid,
     pub keypair: Arc<Keypair>,
-    pub lower_factory: F,
+    pub lower_factory: Arc<F>,
     pub peer_store: PeerStore<F::Address>,
     pub cache: SeenCache,
     pub local_rx: mpsc::Receiver<OutgoingLocalMessage>,
@@ -72,11 +72,11 @@ pub struct GossipNode<F: Factory> {
     pub default_ttl: u8,
 }
 
-impl<F: Factory> GossipNode<F> {
+impl<F: ?Sized + Factory> GossipNode<F> {
     pub fn spawn(
         network_id: Uuid,
         keypair: Keypair,
-        lower_factory: F,
+        lower_factory: Arc<F>,
         lower_peers: Vec<F::Address>,
         advertise_addr: Option<F::Address>,
         default_ttl: u8,
@@ -94,7 +94,7 @@ impl<F: Factory> GossipNode<F> {
         let node = Self {
             network_id,
             keypair,
-            lower_factory,
+            lower_factory: Arc::clone(&lower_factory),
             peer_store: peer_store.clone(),
             cache: SeenCache::with_default(),
             local_rx,

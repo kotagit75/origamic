@@ -1,29 +1,26 @@
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
-use crate::{factory::Factory, overlay::address::OverlayAddress};
+use crate::overlay::address::OverlayAddress;
 
-pub struct OverlayStream<F: Factory> {
+pub struct OverlayStream {
     pub(crate) inner: DuplexStream,
     pub(crate) peer_addr: OverlayAddress,
     pub(crate) shutdown_rx: Option<oneshot::Receiver<()>>,
-    pub(crate) _phantom: PhantomData<fn() -> F>,
 }
 
-impl<F: Factory> Unpin for OverlayStream<F> {}
+impl Unpin for OverlayStream {}
 
-impl<F: Factory> OverlayStream<F> {
+impl OverlayStream {
     pub fn new(inner: DuplexStream, peer_addr: OverlayAddress) -> Self {
         Self {
             inner,
             peer_addr,
             shutdown_rx: None,
-            _phantom: PhantomData,
         }
     }
 
@@ -36,7 +33,6 @@ impl<F: Factory> OverlayStream<F> {
             inner,
             peer_addr,
             shutdown_rx: Some(shutdown_rx),
-            _phantom: PhantomData,
         }
     }
 
@@ -45,7 +41,7 @@ impl<F: Factory> OverlayStream<F> {
     }
 }
 
-impl<F: Factory> AsyncRead for OverlayStream<F> {
+impl AsyncRead for OverlayStream {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -55,7 +51,7 @@ impl<F: Factory> AsyncRead for OverlayStream<F> {
     }
 }
 
-impl<F: Factory> AsyncWrite for OverlayStream<F> {
+impl AsyncWrite for OverlayStream {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -84,16 +80,16 @@ impl<F: Factory> AsyncWrite for OverlayStream<F> {
     }
 }
 
-pub struct OverlayListener<F: Factory> {
-    pub(crate) inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream<F>, OverlayAddress)>>>,
+pub struct OverlayListener {
+    pub(crate) inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>,
 }
 
-impl<F: Factory> OverlayListener<F> {
-    pub fn new(inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream<F>, OverlayAddress)>>>) -> Self {
+impl OverlayListener {
+    pub fn new(inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>) -> Self {
         Self { inbound_rx }
     }
 
-    pub async fn accept(&mut self) -> std::io::Result<(OverlayStream<F>, OverlayAddress)> {
+    pub async fn accept(&mut self) -> std::io::Result<(OverlayStream, OverlayAddress)> {
         let mut rx = self.inbound_rx.lock().await;
         rx.recv().await.ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::BrokenPipe, "OverlayListener closed")
