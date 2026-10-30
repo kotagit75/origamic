@@ -1,5 +1,5 @@
 [package]
-name = "server-example"
+name = "example-client"
 edition = "2024"
 version.workspace = true
 
