@@ -3,6 +3,8 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::error::AddressParseError;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OverlayAddress(pub [u8; 32]);
 
@@ -32,16 +34,29 @@ impl OverlayAddress {
         s
     }
 
-    pub fn from_hex(s: &str) -> Result<Self, &'static str> {
+    pub fn from_hex(s: &str) -> Result<Self, AddressParseError> {
         if s.len() != 64 {
-            return Err("OverlayAddress must be exactly 64 hex characters (32 bytes)");
+            return Err(AddressParseError::InvalidLength {
+                expected: 64,
+                actual: s.len(),
+            });
         }
 
         let mut bytes = [0u8; 32];
         for i in 0..32 {
             let chunk = &s[i * 2..i * 2 + 2];
-            bytes[i] = u8::from_str_radix(chunk, 16)
-                .map_err(|_| "Invalid hex character in OverlayAddress")?;
+            bytes[i] = u8::from_str_radix(chunk, 16).map_err(|_| {
+                let first_invalid = chunk
+                    .chars()
+                    .enumerate()
+                    .find(|(_, c)| !c.is_ascii_hexdigit())
+                    .map(|(offset, c)| (i * 2 + offset, c))
+                    .unwrap_or((i * 2, '?'));
+                AddressParseError::InvalidHex {
+                    index: first_invalid.0,
+                    character: first_invalid.1,
+                }
+            })?;
         }
 
         Ok(Self(bytes))
@@ -61,7 +76,7 @@ impl fmt::Display for OverlayAddress {
 }
 
 impl std::str::FromStr for OverlayAddress {
-    type Err = &'static str;
+    type Err = AddressParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::from_hex(s)

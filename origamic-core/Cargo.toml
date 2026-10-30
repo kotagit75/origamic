@@ -13,3 +13,4 @@ bincode = { workspace = true }
 tokio-util = { workspace = true, features = ["codec"] }
 futures-util = { workspace = true, features = ["sink"] }
 bytes = { workspace = true }
+thiserror = { workspace = true }

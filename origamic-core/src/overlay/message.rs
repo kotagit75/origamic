@@ -2,6 +2,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::error::ProtocolError;
 use crate::overlay::address::OverlayAddress;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,12 +138,12 @@ impl GossipMessage {
         verifying_key.verify(&digest, &signature).is_ok()
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        bincode::serialize(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        bincode::deserialize(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
     }
 }
 
@@ -161,12 +162,12 @@ impl<A: Serialize + serde::de::DeserializeOwned> PeerExchangePayload<A> {
         }
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        bincode::serialize(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        bincode::deserialize(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
     }
 }
 
@@ -207,12 +208,12 @@ impl StreamFrame {
         }
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        bincode::serialize(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        bincode::deserialize(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
     }
 }
 

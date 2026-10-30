@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
 use crate::{
+    error::SendError,
     factory::Factory,
     gossip::{
         node::{GossipNode, GossipNodeHandle, OutgoingLocalMessage, process_inbound_stream},
@@ -51,6 +52,15 @@ pub struct OverlayContext {
     pub(crate) local_tx: mpsc::Sender<OutgoingLocalMessage>,
     pub(crate) active_streams: Arc<Mutex<ActiveStreamMap>>,
     pub(crate) inbound_stream_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>,
+}
+
+impl std::fmt::Debug for OverlayContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OverlayContext")
+            .field("network_id", &self.network_id)
+            .field("address", &self.address())
+            .finish()
+    }
 }
 
 const DEFAULT_GOSSIP_TTL: u8 = 7;
@@ -157,6 +167,106 @@ impl OverlayContext {
         }
     }
 
+    /// 新規ネットワークを立ち上げてノードを生成（リスナー起動成否を確認）
+    pub async fn try_new<F: Factory>(
+        lower_factory: Arc<F>,
+        lower_peers: Vec<F::Address>,
+    ) -> std::io::Result<Self> {
+        Self::try_with_network(Uuid::new_v4(), lower_factory, lower_peers).await
+    }
+
+    /// 既存のネットワークIDに参加するノードを生成（リスナー起動成否を確認）
+    pub async fn try_with_network<F: Factory>(
+        network_id: Uuid,
+        lower_factory: Arc<F>,
+        lower_peers: Vec<F::Address>,
+    ) -> std::io::Result<Self> {
+        Self::try_with_network_and_keypair(
+            network_id,
+            Keypair::generate(),
+            lower_factory,
+            lower_peers,
+        )
+        .await
+    }
+
+    /// ネットワークIDおよび鍵ペアを指定して生成（リスナー起動成否を確認）
+    pub async fn try_with_network_and_keypair<F: Factory>(
+        network_id: Uuid,
+        keypair: Keypair,
+        lower_factory: Arc<F>,
+        lower_peers: Vec<F::Address>,
+    ) -> std::io::Result<Self> {
+        Self::try_with_options(network_id, keypair, lower_factory, lower_peers, None).await
+    }
+
+    /// 広告用アドレスを指定して生成（リスナー起動成否を確認）
+    pub async fn try_with_advertise<F: Factory>(
+        network_id: Uuid,
+        lower_factory: Arc<F>,
+        lower_peers: Vec<F::Address>,
+        advertise_addr: F::Address,
+    ) -> std::io::Result<Self> {
+        Self::try_with_options(
+            network_id,
+            Keypair::generate(),
+            lower_factory,
+            lower_peers,
+            Some(advertise_addr),
+        )
+        .await
+    }
+
+    /// 全オプションを指定して生成し、下位リスナーの起動成否を確認する
+    pub async fn try_with_options<F: Factory>(
+        network_id: Uuid,
+        keypair: Keypair,
+        lower_factory: Arc<F>,
+        lower_peers: Vec<F::Address>,
+        advertise_addr: Option<F::Address>,
+    ) -> std::io::Result<Self> {
+        let address = keypair.address;
+        let GossipNodeHandle {
+            address: _,
+            network_id: _,
+            local_tx,
+            upper_rx,
+            peer_tx,
+            peer_store,
+        } = GossipNode::spawn(
+            network_id,
+            keypair.clone(),
+            lower_factory.clone(),
+            lower_peers,
+            advertise_addr.clone(),
+            DEFAULT_GOSSIP_TTL,
+            DEFAULT_GOSSIP_BUFFER_SIZE,
+        );
+
+        let active_streams: Arc<Mutex<ActiveStreamMap>> = Arc::new(Mutex::new(HashMap::new()));
+        let (inbound_tx, inbound_rx) = mpsc::channel(128);
+
+        start_stream_router_task(
+            address,
+            upper_rx,
+            active_streams.clone(),
+            local_tx.clone(),
+            inbound_tx,
+        );
+
+        // 下位トランスポートのインバウンドリスナーを起動し、失敗時は即座にエラーを返却
+        lower_factory.start_listener(advertise_addr, peer_tx).await?;
+
+        Ok(Self {
+            network_id,
+            keypair: Arc::new(keypair),
+            peer_adder: Arc::new(TypedPeerAdder { store: peer_store }),
+            local_tx,
+            active_streams,
+            inbound_stream_rx: Arc::new(Mutex::new(inbound_rx)),
+        })
+    }
+
     /// 下位トランスポートのアドレス型に応じたピアを追加
     pub fn add_peer<A: Clone + Eq + std::hash::Hash + Send + Sync + 'static>(&self, addr: A) -> bool {
         self.peer_adder.add_any(Box::new(addr))
@@ -180,13 +290,11 @@ impl OverlayContext {
     }
 
     /// 自ネットワーク全体へブロードキャスト発信
-    pub async fn broadcast(
-        &self,
-        payload: Vec<u8>,
-    ) -> Result<(), mpsc::error::SendError<OutgoingLocalMessage>> {
+    pub async fn broadcast(&self, payload: Vec<u8>) -> Result<(), SendError> {
         self.local_tx
             .send(OutgoingLocalMessage::broadcast(payload))
             .await
+            .map_err(|_| SendError::ChannelClosed)
     }
 
     /// 自ネットワーク内の特定公開鍵宛てにメッセージ発信
@@ -194,10 +302,11 @@ impl OverlayContext {
         &self,
         recipient: OverlayAddress,
         payload: Vec<u8>,
-    ) -> Result<(), mpsc::error::SendError<OutgoingLocalMessage>> {
+    ) -> Result<(), SendError> {
         self.local_tx
             .send(OutgoingLocalMessage::to(recipient, payload))
             .await
+            .map_err(|_| SendError::ChannelClosed)
     }
 }
 

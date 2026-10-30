@@ -45,7 +45,7 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
             return false;
         }
 
-        let mut lock = self.peers.write().unwrap();
+        let mut lock = self.peers.write().unwrap_or_else(|e| e.into_inner());
         if lock.len() >= self.max_peers && !lock.contains(&addr) {
             return false;
         }
@@ -65,13 +65,13 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
 
     /// ピアを削除。存在して削除された場合は true。
     pub fn remove_peer(&self, addr: &A) -> bool {
-        let mut lock = self.peers.write().unwrap();
+        let mut lock = self.peers.write().unwrap_or_else(|e| e.into_inner());
         lock.remove(addr)
     }
 
     /// 現在保持している全ピアのリストを取得。
     pub fn get_peers(&self) -> Vec<A> {
-        let lock = self.peers.read().unwrap();
+        let lock = self.peers.read().unwrap_or_else(|e| e.into_inner());
         lock.iter().cloned().collect()
     }
 
@@ -86,14 +86,14 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
     }
 
     pub fn len(&self) -> usize {
-        self.peers.read().unwrap().len()
+        self.peers.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.peers.read().unwrap().is_empty()
+        self.peers.read().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
     pub fn contains(&self, addr: &A) -> bool {
-        self.peers.read().unwrap().contains(addr)
+        self.peers.read().unwrap_or_else(|e| e.into_inner()).contains(addr)
     }
 }
