@@ -1,3 +1,34 @@
+//! Overlay network context – the primary user-facing API.
+//!
+//! [`OverlayContext`] is the central handle for an overlay network node. It
+//! owns the gossip layer, the virtual-stream multiplexer, and the node's
+//! cryptographic identity. Because it is `Clone`, it can be freely shared
+//! across tasks.
+//!
+//! # Constructors
+//!
+//! Two families of constructors are provided:
+//!
+//! | Family | Listener start | Error handling |
+//! |---|---|---|
+//! | `with_*` / `new` | Fire-and-forget (errors printed to stderr) | Sync, returns `Self` |
+//! | `try_with_*` / `try_new` | Awaited | `async`, returns `std::io::Result<Self>` |
+//!
+//! Prefer the `try_*` variants in production code so that listener bind
+//! failures surface as errors instead of being silently swallowed.
+//!
+//! # Virtual Streams
+//!
+//! `OverlayContext` implements [`Factory`] with `Stream = `[`OverlayStream`]
+//! and `Address = `[`OverlayAddress`], enabling it to be stacked as the
+//! lower-level transport for another `OverlayContext` (recursive overlay).
+//!
+//! Outbound streams are created via [`Factory::connect`]; inbound streams are
+//! accepted via [`listen`].
+//!
+//! [`Factory`]: crate::factory::Factory
+//! [`listen`]: OverlayContext::listen
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -20,13 +51,27 @@ use crate::{
     },
 };
 
+// Map of active virtual streams keyed by (remote address, stream id).
 type ActiveStreamMap = HashMap<(OverlayAddress, u64), mpsc::Sender<Vec<u8>>>;
 
-/// 型消去されたピア追加インターフェース
+/// A type-erased interface for adding peers to the underlying [`PeerStore`].
+///
+/// `AnyPeerAdder` lets [`OverlayContext`] accept peers of the concrete lower
+/// transport address type (`F::Address`) without exposing a generic type
+/// parameter on `OverlayContext` itself. The concrete implementation
+/// `TypedPeerAdder` performs a checked downcast at runtime.
+///
+/// [`PeerStore`]: crate::gossip::peers::PeerStore
 pub trait AnyPeerAdder: Send + Sync {
+    /// Attempts to add `peer` (a type-erased address) to the store.
+    ///
+    /// Returns `true` if the peer was newly inserted, or `false` if the
+    /// downcast failed, the address matched the node's own address, or the
+    /// store was at capacity.
     fn add_any(&self, peer: Box<dyn std::any::Any + Send>) -> bool;
 }
 
+// Private implementation of AnyPeerAdder that holds the concrete PeerStore.
 struct TypedPeerAdder<A: Clone + Eq + std::hash::Hash + Send + Sync + 'static> {
     store: PeerStore<A>,
 }
@@ -41,9 +86,19 @@ impl<A: Clone + Eq + std::hash::Hash + Send + Sync + 'static> AnyPeerAdder for T
     }
 }
 
-/// オーバーレイネットワークのノード状態を管理するコンテキスト。
-/// 自身が `Factory` を実装しており、最上位オーバーレイ層でのストリーム接続や、
-/// インバウンドリスナーの取得が行える。
+/// The main handle for an overlay network node.
+///
+/// `OverlayContext` combines:
+/// - A gossip node (see [`GossipNode`]) running over a lower-level [`Factory`].
+/// - A virtual-stream multiplexer that maps `(peer_addr, stream_id)` pairs to
+///   async duplex streams.
+/// - The node's [`Keypair`] for signing outgoing messages.
+///
+/// Because it is `Clone` and all internal state is reference-counted, multiple
+/// handles to the same node can be held across tasks.
+///
+/// [`GossipNode`]: crate::gossip::node::GossipNode
+/// [`Factory`]: crate::factory::Factory
 #[derive(Clone)]
 pub struct OverlayContext {
     network_id: Uuid,
@@ -63,16 +118,37 @@ impl std::fmt::Debug for OverlayContext {
     }
 }
 
+// Default gossip TTL (maximum hop count for forwarded messages).
 const DEFAULT_GOSSIP_TTL: u8 = 7;
+// Internal channel buffer size for gossip messages.
 const DEFAULT_GOSSIP_BUFFER_SIZE: usize = 256;
 
 impl OverlayContext {
-    /// 新規ネットワーク（ランダムなUuid）を立ち上げてノードを生成
+    // -----------------------------------------------------------------------
+    // Fire-and-forget constructors (sync, listener errors printed to stderr)
+    // -----------------------------------------------------------------------
+
+    /// Creates a new node on a freshly generated random network.
+    ///
+    /// A new random [`Uuid`] is used as the network identifier. The lower
+    /// transport listener is started in a background task; if it fails to bind,
+    /// the error is printed to stderr rather than returned.
+    ///
+    /// Prefer [`try_new`] when you need to detect listener failures.
+    ///
+    /// [`try_new`]: OverlayContext::try_new
     pub fn new<F: Factory>(lower_factory: Arc<F>, lower_peers: Vec<F::Address>) -> Self {
         Self::with_network(Uuid::new_v4(), lower_factory, lower_peers)
     }
 
-    /// 既存のネットワークID（Uuid）に参加するノードを生成
+    /// Creates a node that joins an existing network identified by `network_id`.
+    ///
+    /// A random [`Keypair`] is generated for this node. The lower transport
+    /// listener is started in a background task; errors are printed to stderr.
+    ///
+    /// Prefer [`try_with_network`] when you need to detect listener failures.
+    ///
+    /// [`try_with_network`]: OverlayContext::try_with_network
     pub fn with_network<F: Factory>(
         network_id: Uuid,
         lower_factory: Arc<F>,
@@ -81,7 +157,15 @@ impl OverlayContext {
         Self::with_network_and_keypair(network_id, Keypair::generate(), lower_factory, lower_peers)
     }
 
-    /// ネットワークIDおよび鍵ペアを明示指定してノードを生成
+    /// Creates a node with an explicit network ID and keypair.
+    ///
+    /// The lower transport listener is started in a background task; errors are
+    /// printed to stderr.
+    ///
+    /// Prefer [`try_with_network_and_keypair`] when you need to detect listener
+    /// failures.
+    ///
+    /// [`try_with_network_and_keypair`]: OverlayContext::try_with_network_and_keypair
     pub fn with_network_and_keypair<F: Factory>(
         network_id: Uuid,
         keypair: Keypair,
@@ -91,7 +175,16 @@ impl OverlayContext {
         Self::with_options(network_id, keypair, lower_factory, lower_peers, None)
     }
 
-    /// 広告用アドレス（自身の受付アドレス）を指定してノードを生成
+    /// Creates a node with an explicit network ID and an advertised listen address.
+    ///
+    /// `advertise_addr` is broadcast to peers via Peer Exchange so that they
+    /// can connect to this node. A random keypair is generated. The lower
+    /// transport listener is started in a background task; errors are printed
+    /// to stderr.
+    ///
+    /// Prefer [`try_with_advertise`] when you need to detect listener failures.
+    ///
+    /// [`try_with_advertise`]: OverlayContext::try_with_advertise
     pub fn with_advertise<F: Factory>(
         network_id: Uuid,
         lower_factory: Arc<F>,
@@ -107,7 +200,17 @@ impl OverlayContext {
         )
     }
 
-    /// 全オプションを指定してノードを生成
+    /// Creates a node with full control over all parameters.
+    ///
+    /// Spawns the gossip node and the virtual-stream router as background
+    /// tasks, and starts the lower transport listener in a fire-and-forget
+    /// task (errors are printed to stderr).
+    ///
+    /// This is the canonical sync constructor that all other `with_*`
+    /// constructors delegate to. Prefer [`try_with_options`] when you need to
+    /// propagate listener failures.
+    ///
+    /// [`try_with_options`]: OverlayContext::try_with_options
     pub fn with_options<F: Factory>(
         network_id: Uuid,
         keypair: Keypair,
@@ -144,7 +247,8 @@ impl OverlayContext {
             inbound_tx,
         );
 
-        // 下位トランスポートのインバウンドリスナーを自動起動
+        // Start the lower transport listener in a background task.
+        // Errors are printed to stderr rather than propagated.
         let factory_for_listener = Arc::clone(&lower_factory);
         let addr_for_listener = advertise_addr;
         let peer_tx_for_listener = peer_tx.clone();
@@ -167,7 +271,13 @@ impl OverlayContext {
         }
     }
 
-    /// 新規ネットワークを立ち上げてノードを生成（リスナー起動成否を確認）
+    // -----------------------------------------------------------------------
+    // Async constructors (propagate listener errors)
+    // -----------------------------------------------------------------------
+
+    /// Creates a node on a fresh random network and awaits listener startup.
+    ///
+    /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_new<F: Factory>(
         lower_factory: Arc<F>,
         lower_peers: Vec<F::Address>,
@@ -175,7 +285,9 @@ impl OverlayContext {
         Self::try_with_network(Uuid::new_v4(), lower_factory, lower_peers).await
     }
 
-    /// 既存のネットワークIDに参加するノードを生成（リスナー起動成否を確認）
+    /// Creates a node that joins an existing network and awaits listener startup.
+    ///
+    /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_with_network<F: Factory>(
         network_id: Uuid,
         lower_factory: Arc<F>,
@@ -190,7 +302,9 @@ impl OverlayContext {
         .await
     }
 
-    /// ネットワークIDおよび鍵ペアを指定して生成（リスナー起動成否を確認）
+    /// Creates a node with an explicit keypair and awaits listener startup.
+    ///
+    /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_with_network_and_keypair<F: Factory>(
         network_id: Uuid,
         keypair: Keypair,
@@ -200,7 +314,9 @@ impl OverlayContext {
         Self::try_with_options(network_id, keypair, lower_factory, lower_peers, None).await
     }
 
-    /// 広告用アドレスを指定して生成（リスナー起動成否を確認）
+    /// Creates a node with an advertised address and awaits listener startup.
+    ///
+    /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_with_advertise<F: Factory>(
         network_id: Uuid,
         lower_factory: Arc<F>,
@@ -217,7 +333,13 @@ impl OverlayContext {
         .await
     }
 
-    /// 全オプションを指定して生成し、下位リスナーの起動成否を確認する
+    /// Creates a node with all options specified and awaits listener startup.
+    ///
+    /// Unlike [`with_options`], this constructor `await`s the call to
+    /// `start_listener` on the lower factory and propagates any error
+    /// immediately, making it the recommended constructor for production use.
+    ///
+    /// [`with_options`]: OverlayContext::with_options
     pub async fn try_with_options<F: Factory>(
         network_id: Uuid,
         keypair: Keypair,
@@ -254,8 +376,10 @@ impl OverlayContext {
             inbound_tx,
         );
 
-        // 下位トランスポートのインバウンドリスナーを起動し、失敗時は即座にエラーを返却
-        lower_factory.start_listener(advertise_addr, peer_tx).await?;
+        // Await listener startup and propagate errors to the caller.
+        lower_factory
+            .start_listener(advertise_addr, peer_tx)
+            .await?;
 
         Ok(Self {
             network_id,
@@ -267,29 +391,63 @@ impl OverlayContext {
         })
     }
 
-    /// 下位トランスポートのアドレス型に応じたピアを追加
-    pub fn add_peer<A: Clone + Eq + std::hash::Hash + Send + Sync + 'static>(&self, addr: A) -> bool {
+    // -----------------------------------------------------------------------
+    // Node API
+    // -----------------------------------------------------------------------
+
+    /// Adds a peer address of the lower transport type to the gossip node's
+    /// peer store.
+    ///
+    /// The address is type-erased via [`AnyPeerAdder`] so that `OverlayContext`
+    /// itself does not need to be generic over the transport address type.
+    ///
+    /// Returns `true` if the peer was newly inserted.
+    pub fn add_peer<A: Clone + Eq + std::hash::Hash + Send + Sync + 'static>(
+        &self,
+        addr: A,
+    ) -> bool {
         self.peer_adder.add_any(Box::new(addr))
     }
 
+    /// Returns the UUID that identifies this node's overlay network.
     pub fn network_id(&self) -> Uuid {
         self.network_id
     }
 
+    /// Returns the node's [`OverlayAddress`] (derived from its Ed25519 public key).
     pub fn address(&self) -> OverlayAddress {
         self.keypair.address
     }
 
-    /// インバウンド仮想ストリームを待受けるリスナーを取得
+    /// Creates an [`OverlayListener`] that yields incoming virtual streams.
+    ///
+    /// Multiple listeners may be created; they share the same underlying
+    /// channel so each incoming stream is delivered to exactly one listener.
     pub fn listen(&self) -> OverlayListener {
         OverlayListener::new(self.inbound_stream_rx.clone())
     }
 
+    /// Returns the shared receiver for incoming virtual streams.
+    ///
+    /// This is the lower-level counterpart to [`listen`]. Prefer [`listen`]
+    /// unless you need direct access to the channel for advanced use cases.
+    ///
+    /// [`listen`]: OverlayContext::listen
     pub fn inbound_stream_rx(&self) -> Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>> {
         self.inbound_stream_rx.clone()
     }
 
-    /// 自ネットワーク全体へブロードキャスト発信
+    /// Broadcasts a raw payload to all nodes on this overlay network.
+    ///
+    /// The gossip node wraps `payload` in a signed [`GossipMessage`] and
+    /// propagates it to all connected peers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SendError::ChannelClosed`] if the internal gossip channel has
+    /// been closed (i.e. the gossip node task has terminated).
+    ///
+    /// [`GossipMessage`]: crate::overlay::message::GossipMessage
     pub async fn broadcast(&self, payload: Vec<u8>) -> Result<(), SendError> {
         self.local_tx
             .send(OutgoingLocalMessage::broadcast(payload))
@@ -297,7 +455,15 @@ impl OverlayContext {
             .map_err(|_| SendError::ChannelClosed)
     }
 
-    /// 自ネットワーク内の特定公開鍵宛てにメッセージ発信
+    /// Sends a raw payload to a specific node identified by its [`OverlayAddress`].
+    ///
+    /// The gossip node signs and forwards the message through the network.
+    /// Delivery is best-effort; no acknowledgement is returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SendError::ChannelClosed`] if the internal gossip channel has
+    /// been closed.
     pub async fn send_to(
         &self,
         recipient: OverlayAddress,
@@ -314,6 +480,19 @@ impl Factory for OverlayContext {
     type Stream = OverlayStream;
     type Address = OverlayAddress;
 
+    /// Opens a virtual stream to the node at `addr`.
+    ///
+    /// Internally spawns an outbound bridge task that:
+    /// 1. Registers a `(addr, stream_id)` entry in the active stream map.
+    /// 2. Reads data written by the caller and wraps it in [`StreamFrame`]
+    ///    messages sent via the gossip layer.
+    /// 3. Forwards incoming [`StreamFrame`]s from the router to the read side
+    ///    of the returned [`OverlayStream`].
+    ///
+    /// The returned future resolves synchronously (the stream object is
+    /// created before any network I/O occurs).
+    ///
+    /// [`StreamFrame`]: crate::overlay::message::StreamFrame
     fn connect(
         &self,
         addr: Self::Address,
@@ -338,6 +517,13 @@ impl Factory for OverlayContext {
         Box::pin(async move { Ok(overlay_stream) })
     }
 
+    /// Starts forwarding inbound overlay streams to `peer_tx` as gossip messages.
+    ///
+    /// When `OverlayContext` is used as the lower-layer transport for another
+    /// `OverlayContext` (recursive overlay), this method bridges the inner
+    /// overlay's inbound stream channel to the outer gossip node's peer
+    /// message channel. The `_bind_addr` parameter is ignored because
+    /// addressing is handled at the overlay level.
     fn start_listener(
         &self,
         _bind_addr: Option<Self::Address>,
@@ -356,7 +542,20 @@ impl Factory for OverlayContext {
     }
 }
 
-/// アウトバウンド仮想ストリームの送受信ブリッジタスクを起動
+/// Spawns a background task that bridges an outbound virtual stream to the
+/// gossip network.
+///
+/// The task:
+/// - Registers `(addr, stream_id)` in `active_streams`.
+/// - Reads bytes written to `internal_stream` and sends them as [`StreamFrame`]
+///   messages via `local_tx`. The very first chunk is sent as an *init* frame
+///   so the receiver can identify new streams.
+/// - Writes bytes received from `from_router_rx` to the read side of
+///   `internal_stream`.
+/// - On EOF or error, sends a close frame, fires `shutdown_tx`, and removes
+///   itself from `active_streams`.
+///
+/// [`StreamFrame`]: crate::overlay::message::StreamFrame
 pub(crate) fn spawn_outbound_stream_bridge(
     addr: OverlayAddress,
     stream_id: u64,
@@ -377,7 +576,7 @@ pub(crate) fn spawn_outbound_stream_bridge(
 
         let (mut read_half, mut write_half) = tokio::io::split(internal_stream);
 
-        // 送信ブリッジ: user_stream への write を相手宛ての StreamFrame としてゴシップ網へ発信
+        // Send bridge: reads from internal_stream and sends StreamFrames to the gossip network.
         let mut shutdown_tx = Some(shutdown_tx);
         let send_task = async {
             let mut buf = vec![0u8; 4096];
@@ -429,7 +628,7 @@ pub(crate) fn spawn_outbound_stream_bridge(
             }
         };
 
-        // 受信ブリッジ: router から届いた相手からのデータを user_stream の読み出し側へ書き込む
+        // Receive bridge: forwards data from the router to the read side of internal_stream.
         let recv_task = async {
             while let Some(data) = from_router_rx.recv().await {
                 if write_half.write_all(&data).await.is_err() {
@@ -444,13 +643,25 @@ pub(crate) fn spawn_outbound_stream_bridge(
             _ = recv_task => {},
         }
 
-        // 終了処理: active_streams から削除
+        // Clean up: remove this stream from the active map.
         let mut map = active_streams.lock().await;
         map.remove(&(addr, stream_id));
     });
 }
 
-/// 仮想ストリーム多重化ルータタスク（上位受信メッセージを各ストリームへ振り分け）
+/// Spawns the stream router task that demultiplexes incoming gossip messages
+/// into individual virtual streams.
+///
+/// The router receives [`GossipMessage`]s from the gossip node via `upper_rx`,
+/// decodes the embedded [`StreamFrame`], and dispatches data to the
+/// appropriate sender in `active_streams`. If no matching stream exists and the
+/// frame is an init or non-empty data frame, a new inbound stream bridge is
+/// spawned and the resulting [`OverlayStream`] is sent to `inbound_tx`.
+///
+/// Messages addressed to a different node are silently dropped.
+///
+/// [`GossipMessage`]: crate::overlay::message::GossipMessage
+/// [`StreamFrame`]: crate::overlay::message::StreamFrame
 fn start_stream_router_task(
     self_address: OverlayAddress,
     mut upper_rx: mpsc::Receiver<GossipMessage>,
@@ -460,14 +671,14 @@ fn start_stream_router_task(
 ) {
     tokio::spawn(async move {
         while let Some(msg) = upper_rx.recv().await {
-            // 宛先チェック: 自分宛て、またはブロードキャストのみ処理
+            // Drop messages that are not addressed to this node.
             if let Some(target) = msg.recipient
                 && target != self_address
             {
                 continue;
             }
 
-            // StreamFrame のデコード
+            // Decode the StreamFrame from the message payload.
             let Ok(frame) = StreamFrame::decode(&msg.payload) else {
                 continue;
             };
@@ -483,7 +694,7 @@ fn start_stream_router_task(
             if let Some(stream_tx) = streams.get(&key) {
                 let _ = stream_tx.send(frame.data).await;
             } else if frame.is_init || !frame.data.is_empty() {
-                // 新規インバウンドストリームの生成
+                // New inbound stream: spawn a bridge and deliver it to the listener.
                 spawn_inbound_stream_bridge(
                     key,
                     frame.data,
@@ -498,7 +709,20 @@ fn start_stream_router_task(
     });
 }
 
-/// 新規インバウンド接続用の duplex ストリームおよび送受信ブリッジを起動
+/// Spawns the bridge task for a newly accepted inbound virtual stream.
+///
+/// Creates a `tokio::io::duplex` pair: one end (`user_stream`) is wrapped in
+/// an [`OverlayStream`] and sent to the application via `inbound_tx`; the
+/// other end (`internal_stream`) is managed by the bridge task, which:
+/// - Reads data written by the application and forwards it as [`StreamFrame`]
+///   messages to the sender.
+/// - Writes data received from the router (`from_router_rx`) to the read side
+///   of `user_stream`.
+///
+/// On close or error, a close frame is sent, `shutdown_tx` is fired, and the
+/// entry is removed from `active_streams`.
+///
+/// [`StreamFrame`]: crate::overlay::message::StreamFrame
 async fn spawn_inbound_stream_bridge(
     (sender_addr, stream_id): (OverlayAddress, u64),
     initial_data: Vec<u8>,
@@ -516,7 +740,7 @@ async fn spawn_inbound_stream_bridge(
 
     let (mut read_half, mut write_half) = tokio::io::split(internal_stream);
 
-    // インバウンドストリーム用の送受信ブリッジタスク
+    // Bridge task for the inbound stream.
     let active_streams_clone = active_streams.clone();
     tokio::spawn(async move {
         let mut shutdown_tx = Some(shutdown_tx);
@@ -528,7 +752,8 @@ async fn spawn_inbound_stream_bridge(
                         let close_frame = StreamFrame::new_close(stream_id);
                         if let Ok(encoded) = close_frame.encode() {
                             let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-                            let out = OutgoingLocalMessage::to_with_done(sender_addr, encoded, done_tx);
+                            let out =
+                                OutgoingLocalMessage::to_with_done(sender_addr, encoded, done_tx);
                             let _ = local_tx.send(out).await;
                             let _ = done_rx.await;
                         }
@@ -550,7 +775,8 @@ async fn spawn_inbound_stream_bridge(
                         let close_frame = StreamFrame::new_close(stream_id);
                         if let Ok(encoded) = close_frame.encode() {
                             let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-                            let out = OutgoingLocalMessage::to_with_done(sender_addr, encoded, done_tx);
+                            let out =
+                                OutgoingLocalMessage::to_with_done(sender_addr, encoded, done_tx);
                             let _ = local_tx.send(out).await;
                             let _ = done_rx.await;
                         }
@@ -577,7 +803,7 @@ async fn spawn_inbound_stream_bridge(
             _ = recv_task => {},
         }
 
-        // 終了処理: active_streams から削除
+        // Clean up: remove this stream from the active map.
         let mut map = active_streams_clone.lock().await;
         map.remove(&(sender_addr, stream_id));
     });

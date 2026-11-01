@@ -1,3 +1,21 @@
+//! Gossip node – the epidemic broadcast engine.
+//!
+//! [`GossipNode`] runs an async event loop that implements a push-based
+//! epidemic broadcast protocol:
+//!
+//! 1. **Outgoing messages** from the local application arrive via the
+//!    `local_rx` channel, are signed, deduplicated and fanned out to every
+//!    currently known peer.
+//! 2. **Incoming messages** from peers arrive via the `peer_rx` channel,
+//!    pass signature verification and the seen-cache check, then are either
+//!    relayed to other peers (TTL decrement) or delivered to the upper layer.
+//! 3. **Peer Exchange (PEX)** control messages are broadcast periodically so
+//!    the node's view of the network converges automatically.
+//!
+//! The node is spawned onto the Tokio runtime via [`GossipNode::spawn`], which
+//! returns a [`GossipNodeHandle`] that the caller uses to communicate with the
+//! event loop.
+
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
@@ -14,14 +32,24 @@ use crate::{
     },
 };
 
+/// A message originating from the local application that should be broadcast
+/// (or unicast) into the gossip network.
+///
+/// This is an internal type used to communicate between [`OverlayContext`](crate::overlay::context::OverlayContext)
+/// and the [`GossipNode`] event loop.
 #[derive(Debug)]
 pub struct OutgoingLocalMessage {
+    /// `None` means broadcast; `Some(addr)` means unicast to a specific peer.
     pub recipient: Option<OverlayAddress>,
+    /// Raw application payload bytes.
     pub payload: Vec<u8>,
+    /// Optional oneshot sender that is fired once the message has been
+    /// dispatched to all known peers.
     pub done_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl OutgoingLocalMessage {
+    /// Create a broadcast message with no specific recipient.
     pub fn broadcast(payload: Vec<u8>) -> Self {
         Self {
             recipient: None,
@@ -30,6 +58,7 @@ impl OutgoingLocalMessage {
         }
     }
 
+    /// Create a unicast message addressed to `recipient`.
     pub fn to(recipient: OverlayAddress, payload: Vec<u8>) -> Self {
         Self {
             recipient: Some(recipient),
@@ -38,6 +67,10 @@ impl OutgoingLocalMessage {
         }
     }
 
+    /// Create a unicast message with a completion notification channel.
+    ///
+    /// `done_tx` will be signalled once the message has been sent to all
+    /// currently reachable peers.
     pub fn to_with_done(
         recipient: OverlayAddress,
         payload: Vec<u8>,
@@ -51,28 +84,69 @@ impl OutgoingLocalMessage {
     }
 }
 
+/// A handle returned by [`GossipNode::spawn`] that gives the caller access to
+/// the channels and shared state of the running gossip event loop.
 pub struct GossipNodeHandle<F: ?Sized + Factory> {
+    /// The Ed25519 public key address of this node.
     pub address: OverlayAddress,
+    /// The UUID that identifies the overlay network this node belongs to.
     pub network_id: Uuid,
+    /// Channel for sending outgoing messages from the local application into
+    /// the gossip event loop.
     pub local_tx: mpsc::Sender<OutgoingLocalMessage>,
+    /// Channel from which the upper layer (e.g. `OverlayContext`) receives
+    /// gossip messages addressed to this network.
     pub upper_rx: mpsc::Receiver<GossipMessage>,
+    /// Channel for injecting raw [`GossipMessage`] frames from inbound streams
+    /// into the gossip event loop.
     pub peer_tx: mpsc::Sender<GossipMessage>,
+    /// Shared peer address store.  The upper layer can call
+    /// [`PeerStore::add_peer`] to seed the initial peer set.
     pub peer_store: PeerStore<F::Address>,
 }
 
+/// The gossip node event loop.
+///
+/// Callers should **not** interact with `GossipNode` directly; use
+/// [`GossipNode::spawn`] and operate through the returned [`GossipNodeHandle`].
 pub struct GossipNode<F: ?Sized + Factory> {
+    /// UUID of the overlay network.
     pub network_id: Uuid,
+    /// Ed25519 key pair used to sign outgoing messages.
     pub keypair: Arc<Keypair>,
+    /// Lower-layer transport used to open outgoing connections to peers.
     pub lower_factory: Arc<F>,
+    /// Set of known lower-layer peer addresses.
     pub peer_store: PeerStore<F::Address>,
+    /// Deduplication cache that prevents re-processing the same message.
     pub cache: SeenCache,
+    /// Receives messages from the local application via [`OutgoingLocalMessage`].
     pub local_rx: mpsc::Receiver<OutgoingLocalMessage>,
+    /// Receives raw [`GossipMessage`] frames forwarded from inbound peer streams.
     pub peer_rx: mpsc::Receiver<GossipMessage>,
+    /// Sends messages destined for the upper overlay layer.
     pub upper_tx: mpsc::Sender<GossipMessage>,
+    /// Default TTL assigned to freshly created messages.
     pub default_ttl: u8,
 }
 
 impl<F: ?Sized + Factory> GossipNode<F> {
+    /// Spawn a new gossip node onto the Tokio runtime.
+    ///
+    /// The node runs as an independent task and communicates with its owner
+    /// exclusively through the channels contained in the returned
+    /// [`GossipNodeHandle`].
+    ///
+    /// # Parameters
+    ///
+    /// - `network_id` – UUID identifying the overlay network.
+    /// - `keypair` – Ed25519 key pair for signing outgoing messages.
+    /// - `lower_factory` – transport used to connect to known peers.
+    /// - `lower_peers` – seed list of peer addresses (typically the bootstrap nodes).
+    /// - `advertise_addr` – the local address advertised to peers via PEX;
+    ///   `None` means this node does not accept inbound connections.
+    /// - `default_ttl` – number of hops a freshly created message travels.
+    /// - `buffer_size` – capacity of the internal mpsc channels.
     pub fn spawn(
         network_id: Uuid,
         keypair: Keypair,
@@ -115,9 +189,9 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         }
     }
 
-    /// イベントループの実行
+    /// Run the gossip event loop until all senders are dropped.
     pub async fn run(mut self) {
-        // 起動直後に初回 PEX アナウンス
+        // Announce ourselves immediately so peers learn our address.
         self.send_peer_exchange();
 
         let mut discovery_interval = tokio::time::interval(tokio::time::Duration::from_secs(3));
@@ -139,7 +213,8 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         }
     }
 
-    /// 定期またはイベント駆動での PEX (Peer Exchange) 発信
+    /// Build and broadcast a PEX control message containing our own listen
+    /// address and a random sample of known peers.
     fn send_peer_exchange(&mut self) {
         let pex = PeerExchangePayload::new(
             self.peer_store.self_addr().cloned(),
@@ -160,7 +235,7 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         }
     }
 
-    /// 自ノードからの新規メッセージ発信処理 (FromLocal)
+    /// Handle a message originating from the local application.
     async fn handle_local(&mut self, local_msg: OutgoingLocalMessage) {
         let done_tx = local_msg.done_tx;
         let msg = self.create_signed_message(local_msg.recipient, local_msg.payload);
@@ -168,19 +243,26 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         self.broadcast_with_done(&msg, done_tx);
     }
 
-    /// ピアから受信したメッセージのパイプライン処理 (FromPeer)
+    /// Handle a message received from a peer.
+    ///
+    /// Processing pipeline:
+    /// 1. Verify the Ed25519 signature.
+    /// 2. Deduplicate via the seen-cache.
+    /// 3. If it is a control (PEX) message, update the peer store and relay.
+    /// 4. Otherwise relay the message (TTL decrement) and deliver to the upper
+    ///    layer if the `network_id` matches.
     async fn handle_peer(&mut self, msg: GossipMessage) {
-        // 1. 署名検証
+        // 1. Signature check
         if !msg.verify() {
             return;
         }
 
-        // 2. 既読チェック（重複排除）
+        // 2. Deduplication
         if !self.cache.check_and_insert(&msg.id) {
             return;
         }
 
-        // 3. 制御メッセージ（PeerExchange等）の処理
+        // 3. Control messages (PEX)
         if msg.is_control {
             if let Ok(pex) = PeerExchangePayload::<F::Address>::decode(&msg.payload) {
                 if let Some(listen_addr) = pex.listen_addr {
@@ -188,19 +270,17 @@ impl<F: ?Sized + Factory> GossipNode<F> {
                 }
                 self.peer_store.add_peers(pex.known_peers);
             }
-            // 制御メッセージもゴシップ網の拡散のためにリレー
+            // Control messages are still relayed to maintain network connectivity.
             self.maybe_relay(&msg);
             return;
         }
 
-        // 4. 他ネットワークのパケットであってもゴシップ網の接続性のためにリレー
+        // 4. Relay then deliver
         self.maybe_relay(&msg);
-
-        // 5. 自ネットワークに属するメッセージのみ上位層へ配送
         self.maybe_deliver_upper(msg).await;
     }
 
-    /// メッセージ作成ヘルパー
+    /// Sign and wrap `payload` into a [`GossipMessage`].
     fn create_signed_message(
         &self,
         recipient: Option<OverlayAddress>,
@@ -218,7 +298,7 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         )
     }
 
-    /// TTLが残っていれば減衰させて再拡散
+    /// Forward `msg` to all peers after decrementing its TTL, if TTL > 1.
     fn maybe_relay(&self, msg: &GossipMessage) {
         if msg.ttl > 1 {
             let mut relay_msg = msg.clone();
@@ -227,19 +307,21 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         }
     }
 
-    /// 自ネットワークIDと一致する場合のみ上位層へ配信
+    /// Deliver `msg` to the upper overlay layer, but only if its `network_id`
+    /// matches the network this node is participating in.
     async fn maybe_deliver_upper(&self, msg: GossipMessage) {
         if msg.network_id == self.network_id {
             let _ = self.upper_tx.send(msg).await;
         }
     }
 
-    /// 下位ピアへのメッセージブロードキャスト
+    /// Fan out `msg` to all currently known peers (fire-and-forget).
     fn broadcast(&self, msg: &GossipMessage) {
         self.broadcast_with_done(msg, None);
     }
 
-    /// 下位ピアへのメッセージブロードキャスト（完了通知付き）
+    /// Fan out `msg` to all currently known peers and optionally signal
+    /// `done_tx` when the last peer send completes.
     fn broadcast_with_done(
         &self,
         msg: &GossipMessage,
@@ -287,7 +369,15 @@ impl<F: ?Sized + Factory> GossipNode<F> {
     }
 }
 
-/// 下位ストリームから受信したフレームをデコードし、ゴシップノードの peer_tx に渡すリスナー関数
+/// Read length-delimited gossip frames from `stream` and forward each decoded
+/// [`GossipMessage`] to the gossip node via `peer_tx`.
+///
+/// This function is called once per accepted inbound connection and runs until
+/// the stream is closed or `peer_tx` is dropped.
+///
+/// # Errors
+///
+/// Returns an `std::io::Error` if the underlying stream produces a framing error.
 pub async fn process_inbound_stream<S>(
     stream: S,
     peer_tx: mpsc::Sender<GossipMessage>,
