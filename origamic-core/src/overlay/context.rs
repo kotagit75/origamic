@@ -124,158 +124,10 @@ const DEFAULT_GOSSIP_TTL: u8 = 7;
 const DEFAULT_GOSSIP_BUFFER_SIZE: usize = 256;
 
 impl OverlayContext {
-    // -----------------------------------------------------------------------
-    // Fire-and-forget constructors (sync, listener errors printed to stderr)
-    // -----------------------------------------------------------------------
-
-    /// Creates a new node on a freshly generated random network.
+    /// Creates a node on a fresh random network and awaits listener startup.
     ///
     /// A new random [`Uuid`] is used as the network identifier. The lower
-    /// transport listener is started in a background task; if it fails to bind,
-    /// the error is printed to stderr rather than returned.
-    ///
-    /// Prefer [`try_new`] when you need to detect listener failures.
-    ///
-    /// [`try_new`]: OverlayContext::try_new
-    pub fn new<F: Factory>(lower_factory: Arc<F>, lower_peers: Vec<F::Address>) -> Self {
-        Self::with_network(Uuid::new_v4(), lower_factory, lower_peers)
-    }
-
-    /// Creates a node that joins an existing network identified by `network_id`.
-    ///
-    /// A random [`Keypair`] is generated for this node. The lower transport
-    /// listener is started in a background task; errors are printed to stderr.
-    ///
-    /// Prefer [`try_with_network`] when you need to detect listener failures.
-    ///
-    /// [`try_with_network`]: OverlayContext::try_with_network
-    pub fn with_network<F: Factory>(
-        network_id: Uuid,
-        lower_factory: Arc<F>,
-        lower_peers: Vec<F::Address>,
-    ) -> Self {
-        Self::with_network_and_keypair(network_id, Keypair::generate(), lower_factory, lower_peers)
-    }
-
-    /// Creates a node with an explicit network ID and keypair.
-    ///
-    /// The lower transport listener is started in a background task; errors are
-    /// printed to stderr.
-    ///
-    /// Prefer [`try_with_network_and_keypair`] when you need to detect listener
-    /// failures.
-    ///
-    /// [`try_with_network_and_keypair`]: OverlayContext::try_with_network_and_keypair
-    pub fn with_network_and_keypair<F: Factory>(
-        network_id: Uuid,
-        keypair: Keypair,
-        lower_factory: Arc<F>,
-        lower_peers: Vec<F::Address>,
-    ) -> Self {
-        Self::with_options(network_id, keypair, lower_factory, lower_peers, None)
-    }
-
-    /// Creates a node with an explicit network ID and an advertised listen address.
-    ///
-    /// `advertise_addr` is broadcast to peers via Peer Exchange so that they
-    /// can connect to this node. A random keypair is generated. The lower
-    /// transport listener is started in a background task; errors are printed
-    /// to stderr.
-    ///
-    /// Prefer [`try_with_advertise`] when you need to detect listener failures.
-    ///
-    /// [`try_with_advertise`]: OverlayContext::try_with_advertise
-    pub fn with_advertise<F: Factory>(
-        network_id: Uuid,
-        lower_factory: Arc<F>,
-        lower_peers: Vec<F::Address>,
-        advertise_addr: F::Address,
-    ) -> Self {
-        Self::with_options(
-            network_id,
-            Keypair::generate(),
-            lower_factory,
-            lower_peers,
-            Some(advertise_addr),
-        )
-    }
-
-    /// Creates a node with full control over all parameters.
-    ///
-    /// Spawns the gossip node and the virtual-stream router as background
-    /// tasks, and starts the lower transport listener in a fire-and-forget
-    /// task (errors are printed to stderr).
-    ///
-    /// This is the canonical sync constructor that all other `with_*`
-    /// constructors delegate to. Prefer [`try_with_options`] when you need to
-    /// propagate listener failures.
-    ///
-    /// [`try_with_options`]: OverlayContext::try_with_options
-    pub fn with_options<F: Factory>(
-        network_id: Uuid,
-        keypair: Keypair,
-        lower_factory: Arc<F>,
-        lower_peers: Vec<F::Address>,
-        advertise_addr: Option<F::Address>,
-    ) -> Self {
-        let address = keypair.address;
-        let GossipNodeHandle {
-            address: _,
-            network_id: _,
-            local_tx,
-            upper_rx,
-            peer_tx,
-            peer_store,
-        } = GossipNode::spawn(
-            network_id,
-            keypair.clone(),
-            lower_factory.clone(),
-            lower_peers,
-            advertise_addr.clone(),
-            DEFAULT_GOSSIP_TTL,
-            DEFAULT_GOSSIP_BUFFER_SIZE,
-        );
-
-        let active_streams: Arc<Mutex<ActiveStreamMap>> = Arc::new(Mutex::new(HashMap::new()));
-        let (inbound_tx, inbound_rx) = mpsc::channel(128);
-
-        start_stream_router_task(
-            address,
-            upper_rx,
-            active_streams.clone(),
-            local_tx.clone(),
-            inbound_tx,
-        );
-
-        // Start the lower transport listener in a background task.
-        // Errors are printed to stderr rather than propagated.
-        let factory_for_listener = Arc::clone(&lower_factory);
-        let addr_for_listener = advertise_addr;
-        let peer_tx_for_listener = peer_tx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = factory_for_listener
-                .start_listener(addr_for_listener, peer_tx_for_listener)
-                .await
-            {
-                eprintln!("Failed to start lower transport listener: {}", e);
-            }
-        });
-
-        Self {
-            network_id,
-            keypair: Arc::new(keypair),
-            peer_adder: Arc::new(TypedPeerAdder { store: peer_store }),
-            local_tx,
-            active_streams,
-            inbound_stream_rx: Arc::new(Mutex::new(inbound_rx)),
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Async constructors (propagate listener errors)
-    // -----------------------------------------------------------------------
-
-    /// Creates a node on a fresh random network and awaits listener startup.
+    /// transport listener is started in a background task.
     ///
     /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_new<F: Factory>(
@@ -286,6 +138,9 @@ impl OverlayContext {
     }
 
     /// Creates a node that joins an existing network and awaits listener startup.
+    ///
+    /// A random [`Keypair`] is generated for this node. The lower transport
+    /// listener is started in a background task.
     ///
     /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_with_network<F: Factory>(
@@ -304,6 +159,8 @@ impl OverlayContext {
 
     /// Creates a node with an explicit keypair and awaits listener startup.
     ///
+    /// The lower transport listener is started in a background task.
+    ///
     /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_with_network_and_keypair<F: Factory>(
         network_id: Uuid,
@@ -315,6 +172,10 @@ impl OverlayContext {
     }
 
     /// Creates a node with an advertised address and awaits listener startup.
+    ///
+    /// `advertise_addr` is broadcast to peers via Peer Exchange so that they
+    /// can connect to this node. A random keypair is generated. The lower
+    /// transport listener is started in a background task.
     ///
     /// Returns an error if the lower transport listener fails to bind.
     pub async fn try_with_advertise<F: Factory>(
@@ -335,11 +196,8 @@ impl OverlayContext {
 
     /// Creates a node with all options specified and awaits listener startup.
     ///
-    /// Unlike [`with_options`], this constructor `await`s the call to
-    /// `start_listener` on the lower factory and propagates any error
-    /// immediately, making it the recommended constructor for production use.
-    ///
-    /// [`with_options`]: OverlayContext::with_options
+    /// Spawns the gossip node and the virtual-stream router as background
+    /// tasks, and starts the lower transport listener.
     pub async fn try_with_options<F: Factory>(
         network_id: Uuid,
         keypair: Keypair,

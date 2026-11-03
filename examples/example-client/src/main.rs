@@ -34,17 +34,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .read_line(&mut server_addr_str)
         .expect("Failed to read line");
 
-    let context = OverlayContext::with_advertise(
+    let context = OverlayContext::try_with_advertise(
         Uuid::from_str(&network_id_str.trim()).unwrap(),
         Arc::new(TcpFactory::new()),
         tcp_peers,
         listen_addr,
-    );
+    )
+    .await?;
 
     println!("Client Addr: {}", context.address());
 
-    let server_addr: OverlayAddress = server_addr_str.trim().parse().unwrap();
-    let mut stream = context.connect(server_addr).await.unwrap();
+    let server_addr: OverlayAddress = server_addr_str.trim().parse()?;
+    let mut stream = context.connect(server_addr).await?;
 
     println!("Enter messages to send:");
 

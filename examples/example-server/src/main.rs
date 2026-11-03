@@ -8,12 +8,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listen_addr: SocketAddr = "127.0.0.1:8080".parse()?;
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8081".parse()?];
 
-    let context = OverlayContext::with_advertise(
+    let context = OverlayContext::try_with_advertise(
         uuid::Uuid::new_v4(),
         Arc::new(TcpFactory::new()),
         tcp_peers,
         listen_addr,
-    );
+    )
+    .await?;
 
     println!("Network Id: {}", context.network_id());
     println!("Server Addr: {}", context.address());
