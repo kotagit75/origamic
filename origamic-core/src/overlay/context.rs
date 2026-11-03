@@ -5,18 +5,6 @@
 //! cryptographic identity. Because it is `Clone`, it can be freely shared
 //! across tasks.
 //!
-//! # Constructors
-//!
-//! Two families of constructors are provided:
-//!
-//! | Family | Listener start | Error handling |
-//! |---|---|---|
-//! | `with_*` / `new` | Fire-and-forget (errors printed to stderr) | Sync, returns `Self` |
-//! | `try_with_*` / `try_new` | Awaited | `async`, returns `std::io::Result<Self>` |
-//!
-//! Prefer the `try_*` variants in production code so that listener bind
-//! failures surface as errors instead of being silently swallowed.
-//!
 //! # Virtual Streams
 //!
 //! `OverlayContext` implements [`Factory`] with `Stream = `[`OverlayStream`]
