@@ -270,7 +270,7 @@ impl OverlayContext {
     /// Multiple listeners may be created; they share the same underlying
     /// channel so each incoming stream is delivered to exactly one listener.
     pub fn listen(&self) -> OverlayListener {
-        OverlayListener::new(self.inbound_stream_rx.clone())
+        OverlayListener::new(self.inbound_stream_rx.clone(), self.address())
     }
 
     /// Returns the shared receiver for incoming virtual streams.

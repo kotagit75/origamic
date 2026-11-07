@@ -17,7 +17,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
+use tokio::io::{self, AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::overlay::address::OverlayAddress;
@@ -86,7 +86,7 @@ impl AsyncRead for OverlayStream {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
     }
 }
@@ -101,15 +101,15 @@ impl AsyncWrite for OverlayStream {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
+    ) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let _ = Pin::new(&mut self.inner).poll_shutdown(cx)?;
         if let Some(rx) = self.shutdown_rx.as_mut() {
             match Pin::new(rx).poll(cx) {
@@ -134,12 +134,19 @@ impl AsyncWrite for OverlayStream {
 /// [`OverlayContext`]: crate::overlay::context::OverlayContext
 pub struct OverlayListener {
     pub(crate) inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>,
+    local_addr: OverlayAddress,
 }
 
 impl OverlayListener {
     /// Creates an `OverlayListener` from a shared inbound stream receiver.
-    pub fn new(inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>) -> Self {
-        Self { inbound_rx }
+    pub fn new(
+        inbound_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>,
+        local_addr: OverlayAddress,
+    ) -> Self {
+        Self {
+            inbound_rx,
+            local_addr,
+        }
     }
 
     /// Waits for and returns the next incoming stream along with the remote
@@ -153,10 +160,14 @@ impl OverlayListener {
     ///
     /// [`BrokenPipe`]: std::io::ErrorKind::BrokenPipe
     /// [`OverlayContext`]: crate::overlay::context::OverlayContext
-    pub async fn accept(&mut self) -> std::io::Result<(OverlayStream, OverlayAddress)> {
+    pub async fn accept(&mut self) -> io::Result<(OverlayStream, OverlayAddress)> {
         let mut rx = self.inbound_rx.lock().await;
-        rx.recv().await.ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "OverlayListener closed")
-        })
+        rx.recv()
+            .await
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "OverlayListener closed"))
+    }
+
+    pub fn local_addr(&self) -> io::Result<OverlayAddress> {
+        Ok(self.local_addr)
     }
 }
