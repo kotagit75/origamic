@@ -6,4 +6,3 @@ version.workspace = true
 [dependencies]
 origamic-core.workspace = true
 tokio = { workspace = true, features = ["full"] }
-uuid = { workspace = true, features = ["v4", "serde"] }
