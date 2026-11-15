@@ -10,7 +10,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, body::Incoming};
 use hyper_util::rt::TokioIo;
 
-async fn hello(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
+async fn handler(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/hello") => Ok(Response::new(Full::new(Bytes::from("Hello, World!")))),
         _ => {
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         tokio::spawn(async move {
             if let Err(e) = http1::Builder::new()
-                .serve_connection(io, service_fn(hello))
+                .serve_connection(io, service_fn(handler))
                 .await
             {
                 eprintln!("Error: {:?}", e);
