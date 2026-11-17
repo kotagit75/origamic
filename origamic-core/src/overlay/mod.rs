@@ -38,6 +38,7 @@
 //! [`StreamFrame`]: message::StreamFrame
 
 pub mod address;
+pub mod builder;
 pub mod context;
 pub mod message;
 pub mod stream;
