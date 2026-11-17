@@ -11,7 +11,7 @@ use hyper_util::rt::TokioIo;
 use origamic::{
     core::{
         factory::Factory,
-        overlay::{address::OverlayAddress, context::OverlayContext},
+        overlay::{address::OverlayAddress, builder::OverlayContextBuilder},
     },
     tcp::factory::TcpFactory,
 };
@@ -36,13 +36,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .read_line(&mut server_addr_str)
         .expect("Failed to read line");
 
-    let context = OverlayContext::try_with_advertise(
-        Uuid::from_str(&network_id_str.trim()).unwrap(),
-        Arc::new(TcpFactory::new()),
-        tcp_peers,
-        listen_addr,
-    )
-    .await?;
+    let context = OverlayContextBuilder::new()
+        .network_id(Uuid::from_str(&network_id_str.trim())?)
+        .lower_factory(Arc::new(TcpFactory::new()))
+        .lower_peers(tcp_peers)
+        .advertise_addr(listen_addr)
+        .build()
+        .await?;
 
     println!("Client Addr: {}", context.address());
 

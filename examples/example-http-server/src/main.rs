@@ -1,7 +1,8 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use hyper::{Method, StatusCode};
-use origamic::{core::overlay::context::OverlayContext, tcp::factory::TcpFactory};
+use origamic::core::overlay::builder::OverlayContextBuilder;
+use origamic::tcp::factory::TcpFactory;
 
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -26,13 +27,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listen_addr: SocketAddr = "127.0.0.1:8080".parse()?;
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8081".parse()?];
 
-    let context = OverlayContext::try_with_advertise(
-        uuid::Uuid::new_v4(),
-        Arc::new(TcpFactory::new()),
-        tcp_peers,
-        listen_addr,
-    )
-    .await?;
+    let context = OverlayContextBuilder::new()
+        .lower_factory(Arc::new(TcpFactory::new()))
+        .lower_peers(tcp_peers)
+        .advertise_addr(listen_addr)
+        .build()
+        .await?;
 
     println!("Network Id: {}", context.network_id());
     println!("Server Addr: {}", context.address());
