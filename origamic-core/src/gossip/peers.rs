@@ -138,11 +138,17 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
 
     /// Returns `true` if no peers are currently stored.
     pub fn is_empty(&self) -> bool {
-        self.peers.read().unwrap_or_else(|e| e.into_inner()).is_empty()
+        self.peers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Returns `true` if the given address is currently in the store.
     pub fn contains(&self, addr: &A) -> bool {
-        self.peers.read().unwrap_or_else(|e| e.into_inner()).contains(addr)
+        self.peers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(addr)
     }
 }
