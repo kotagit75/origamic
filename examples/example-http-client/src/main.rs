@@ -22,22 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8080".parse()?];
 
-    print!("Network Id: ");
-    io::stdout().flush().unwrap();
-    let mut network_id_str = String::new();
-    io::stdin()
-        .read_line(&mut network_id_str)
-        .expect("Failed to read line");
-
-    print!("Server Addr: ");
-    io::stdout().flush().unwrap();
-    let mut server_addr_str = String::new();
-    io::stdin()
-        .read_line(&mut server_addr_str)
-        .expect("Failed to read line");
+    let (network_id, server_addr) = ask_user()?;
 
     let context = OverlayContextBuilder::new()
-        .network_id(Uuid::from_str(&network_id_str.trim())?)
+        .network_id(network_id)
         .lower_factory(Arc::new(TcpFactory::new()))
         .lower_peers(tcp_peers)
         .advertise_addr(listen_addr)
@@ -46,9 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Client Addr: {}", context.address());
 
-    let server_addr: OverlayAddress = server_addr_str.trim().parse()?;
     let stream = context.connect(server_addr).await?;
-
     let io = TokioIo::new(stream);
     let (mut sender, conn) = http1::handshake::<_, Empty<Bytes>>(io).await?;
 
@@ -67,4 +53,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Response: {}", String::from_utf8_lossy(&body));
     Ok(())
+}
+
+fn ask_user() -> Result<(Uuid, OverlayAddress), Box<dyn std::error::Error>> {
+    print!("Network Id: ");
+    io::stdout().flush().unwrap();
+    let mut network_id_str = String::new();
+    io::stdin()
+        .read_line(&mut network_id_str)
+        .expect("Failed to read line");
+
+    print!("Server Addr: ");
+    io::stdout().flush().unwrap();
+    let mut server_addr_str = String::new();
+    io::stdin()
+        .read_line(&mut server_addr_str)
+        .expect("Failed to read line");
+
+    Ok((
+        Uuid::from_str(&network_id_str.trim())?,
+        server_addr_str.trim().parse::<OverlayAddress>()?,
+    ))
 }
