@@ -1,6 +1,9 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use origamic::{core::overlay::builder::OverlayContextBuilder, tcp::factory::TcpFactory};
+use origamic::{
+    core::{id::OMNI_NETWORK_ID, overlay::builder::OverlayContextBuilder},
+    tcp::factory::TcpFactory,
+};
 use tokio::io;
 
 #[tokio::main]
@@ -9,13 +12,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8081".parse()?];
 
     let context = OverlayContextBuilder::new()
+        .network_id(OMNI_NETWORK_ID)
         .lower_factory(Arc::new(TcpFactory::new()))
         .lower_peers(tcp_peers)
         .advertise_addr(listen_addr)
         .build()
         .await?;
 
-    println!("Network Id: {}", context.network_id());
     println!("Server Addr: {}", context.address());
 
     let mut listener = context.listen();

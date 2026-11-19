@@ -1,29 +1,28 @@
 use std::{
     io::{self, Write},
     net::SocketAddr,
-    str::FromStr,
     sync::Arc,
 };
 
 use origamic::{
     core::{
         factory::Factory,
+        id::OMNI_NETWORK_ID,
         overlay::{address::OverlayAddress, builder::OverlayContextBuilder},
     },
     tcp::factory::TcpFactory,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8080".parse()?];
 
-    let (network_id, server_addr) = ask_user()?;
+    let server_addr = ask_server_address()?;
 
     let context = OverlayContextBuilder::new()
-        .network_id(network_id)
+        .network_id(OMNI_NETWORK_ID)
         .lower_factory(Arc::new(TcpFactory::new()))
         .lower_peers(tcp_peers)
         .advertise_addr(listen_addr)
@@ -51,14 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn ask_user() -> Result<(Uuid, OverlayAddress), Box<dyn std::error::Error>> {
-    print!("Network Id: ");
-    io::stdout().flush().unwrap();
-    let mut network_id_str = String::new();
-    io::stdin()
-        .read_line(&mut network_id_str)
-        .expect("Failed to read line");
-
+fn ask_server_address() -> Result<OverlayAddress, Box<dyn std::error::Error>> {
     print!("Server Addr: ");
     io::stdout().flush().unwrap();
     let mut server_addr_str = String::new();
@@ -66,8 +58,5 @@ fn ask_user() -> Result<(Uuid, OverlayAddress), Box<dyn std::error::Error>> {
         .read_line(&mut server_addr_str)
         .expect("Failed to read line");
 
-    Ok((
-        Uuid::from_str(&network_id_str.trim())?,
-        server_addr_str.trim().parse::<OverlayAddress>()?,
-    ))
+    Ok(server_addr_str.trim().parse::<OverlayAddress>()?)
 }

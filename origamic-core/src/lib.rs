@@ -30,6 +30,7 @@
 pub mod error;
 pub mod factory;
 pub mod gossip;
+pub mod id;
 pub mod overlay;
 pub mod stream;
 
