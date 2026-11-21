@@ -33,6 +33,7 @@
 //! forwarded via the gossip layer.
 //!
 //! [`Factory`]: crate::factory::Factory
+//! [`OverlayContextBuilder`]: builder::OverlayContextBuilder
 //! [`OverlayAddress`]: address::OverlayAddress
 //! [`Keypair`]: address::Keypair
 //! [`StreamFrame`]: message::StreamFrame
