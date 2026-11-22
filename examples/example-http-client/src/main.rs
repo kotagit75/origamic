@@ -1,14 +1,11 @@
-use std::{
-    io::{self, Write},
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::io::{self, Write};
 
 use http_body_util::{BodyExt, Empty};
 use hyper::{Request, body::Bytes, client::conn::http1};
 use hyper_util::rt::TokioIo;
 use origamic::{
     core::{
+        builder::NetworkBuilder,
         factory::Factory,
         id::OMNI_NETWORK_ID,
         overlay::{address::OverlayAddress, builder::OverlayContextBuilder},
@@ -18,21 +15,18 @@ use origamic::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
-    let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8080".parse()?];
-
-    let server_addr = ask_server_address()?;
-
-    let context = OverlayContextBuilder::new()
+    let builder = OverlayContextBuilder::new()
         .network_id(OMNI_NETWORK_ID)
-        .lower_factory(Arc::new(TcpFactory::new()))
-        .lower_peers(tcp_peers)
-        .advertise_addr(listen_addr)
+        .lower_peers(vec!["127.0.0.1:8080".parse()?])
+        .advertise_addr("127.0.0.1:8081".parse()?);
+    let context = NetworkBuilder::new(TcpFactory::new())
+        .overlay(builder)
         .build()
         .await?;
 
     println!("Client Addr: {}", context.address());
 
+    let server_addr = ask_server_address()?;
     let stream = context.connect(server_addr).await?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = http1::handshake::<_, Empty<Bytes>>(io).await?;

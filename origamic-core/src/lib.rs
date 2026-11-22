@@ -27,6 +27,7 @@
 //! The crate is designed to be transport-agnostic: any type implementing
 //! [`factory::Factory`] can be used as the underlying carrier.
 
+pub mod builder;
 pub mod error;
 pub mod factory;
 pub mod gossip;

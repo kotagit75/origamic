@@ -1,11 +1,8 @@
-use std::{
-    io::{self, Write},
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::io::{self, Write};
 
 use origamic::{
     core::{
+        builder::NetworkBuilder,
         factory::Factory,
         id::OMNI_NETWORK_ID,
         overlay::{address::OverlayAddress, builder::OverlayContextBuilder},
@@ -16,21 +13,18 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
-    let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8080".parse()?];
-
-    let server_addr = ask_server_address()?;
-
-    let context = OverlayContextBuilder::new()
+    let builder = OverlayContextBuilder::new()
         .network_id(OMNI_NETWORK_ID)
-        .lower_factory(Arc::new(TcpFactory::new()))
-        .lower_peers(tcp_peers)
-        .advertise_addr(listen_addr)
+        .lower_peers(vec!["127.0.0.1:8080".parse()?])
+        .advertise_addr("127.0.0.1:8081".parse()?);
+    let context = NetworkBuilder::new(TcpFactory::new())
+        .overlay(builder)
         .build()
         .await?;
 
     println!("Client Addr: {}", context.address());
 
+    let server_addr = ask_server_address()?;
     let mut stream = context.connect(server_addr).await?;
 
     println!("Enter messages to send:");

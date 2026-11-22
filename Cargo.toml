@@ -17,7 +17,7 @@ bincode = "1.3"
 thiserror = "2.0"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
-bytes = "1.10"
+bytes = "1.12.2"
 origamic-core = { path = "origamic-core" }
 origamic-tcp = { path = "origamic-tcp" }
 origamic = { path = "origamic" }
