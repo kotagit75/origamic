@@ -1,34 +1,32 @@
 //! TCP-backed implementation of the [`Factory`] trait.
 //!
 //! [`TcpFactory`] connects to peers via plain TCP and optionally binds a
-//! [`TcpListener`] to accept inbound gossip connections.
+//! [`TcpListener`] to accept inbound transport streams.
 //!
 //! [`Factory`]: origamic_core::factory::Factory
 
-use origamic_core::{
-    factory::Factory, gossip::node::process_inbound_stream, overlay::message::GossipMessage,
-};
+use origamic_core::factory::Factory;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+
+use crate::listener::TcpListenerAdapter;
 
 /// A [`Factory`] implementation that uses TCP as the transport layer.
 ///
 /// `TcpFactory` can operate in two modes:
 ///
-/// - **Outbound-only** (created with [`new`]): calls to
-///   [`start_listener`] are a no-op unless the caller passes an explicit bind
-///   address.
+/// - **Outbound-only** (created with [`new`]): [`listen`] creates no listener
+///   unless the caller passes an explicit bind address.
 /// - **Listening** (created with [`listening`]): binds a TCP listener on the
-///   given address when [`start_listener`] is called.
+///   given address when [`listen`] is called.
 ///
 /// The factory is `Copy` and cheap to clone, so it can be freely shared.
 ///
 /// [`Factory`]: origamic_core::factory::Factory
 /// [`new`]: TcpFactory::new
 /// [`listening`]: TcpFactory::listening
-/// [`start_listener`]: TcpFactory::start_listener
+/// [`listen`]: Factory::listen
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TcpFactory {
     bind_addr: Option<SocketAddr>,
@@ -38,18 +36,18 @@ impl TcpFactory {
     /// Creates an outbound-only `TcpFactory` with no pre-configured bind
     /// address.
     ///
-    /// [`start_listener`] will be a no-op unless the caller passes an explicit
+    /// [`listen`] will create no listener unless the caller passes an explicit
     /// `bind_addr`.
     ///
-    /// [`start_listener`]: TcpFactory::start_listener
+    /// [`listen`]: Factory::listen
     pub fn new() -> Self {
         Self { bind_addr: None }
     }
 
     /// Creates a `TcpFactory` that will bind a listener on `bind_addr` when
-    /// [`start_listener`] is called.
+    /// [`listen`] is called.
     ///
-    /// [`start_listener`]: TcpFactory::start_listener
+    /// [`listen`]: Factory::listen
     pub fn listening(bind_addr: SocketAddr) -> Self {
         Self {
             bind_addr: Some(bind_addr),
@@ -64,6 +62,7 @@ impl TcpFactory {
 
 impl Factory for TcpFactory {
     type Stream = TcpStream;
+    type Listener = TcpListenerAdapter;
     type Address = SocketAddr;
 
     /// Opens a TCP connection to `addr`.
@@ -78,17 +77,14 @@ impl Factory for TcpFactory {
         Box::pin(async move { Self::Stream::connect(addr).await })
     }
 
-    /// Binds a TCP listener and begins accepting inbound gossip connections.
+    /// Binds a TCP listener for accepting inbound transport streams.
     ///
     /// The effective bind address is resolved as follows (first wins):
     /// 1. The address stored in `self` (set by [`listening`]).
     /// 2. The `bind_addr` argument passed by the caller.
     ///
-    /// If neither is present the function is a no-op and returns `Ok(())`.
-    ///
-    /// On success, a background task is spawned that accepts TCP connections
-    /// and hands each new stream to [`process_inbound_stream`], which drives
-    /// the gossip handshake and forwards decoded messages to `peer_tx`.
+    /// If neither is present, the returned listener waits forever without
+    /// accepting any streams.
     ///
     /// # Errors
     ///
@@ -96,28 +92,17 @@ impl Factory for TcpFactory {
     /// port is already in use or the address is invalid).
     ///
     /// [`listening`]: TcpFactory::listening
-    /// [`process_inbound_stream`]: origamic_core::gossip::node::process_inbound_stream
-    fn start_listener(
+    fn listen(
         &self,
         bind_addr: Option<Self::Address>,
-        peer_tx: mpsc::Sender<GossipMessage>,
-    ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<Self::Listener>> + Send>> {
         let target_addr = self.bind_addr.or(bind_addr);
-        if let Some(addr) = target_addr {
-            Box::pin(async move {
-                let listener = TcpListener::bind(addr).await?;
-                tokio::spawn(async move {
-                    while let Ok((stream, _)) = listener.accept().await {
-                        let tx = peer_tx.clone();
-                        tokio::spawn(async move {
-                            let _ = process_inbound_stream(stream, tx).await;
-                        });
-                    }
-                });
-                Ok(())
-            })
-        } else {
-            Box::pin(async move { Ok(()) })
-        }
+        Box::pin(async move {
+            let listener = match target_addr {
+                Some(addr) => Some(TcpListener::bind(addr).await?),
+                None => None,
+            };
+            Ok(TcpListenerAdapter { listener })
+        })
     }
 }

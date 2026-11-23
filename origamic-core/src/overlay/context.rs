@@ -25,9 +25,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
+use crate::overlay::listener::OverlayListener;
 use crate::{
     error::SendError,
-    factory::Factory,
+    factory::{Factory, Listener},
     gossip::{
         node::{GossipNode, GossipNodeHandle, OutgoingLocalMessage, process_inbound_stream},
         peers::PeerStore,
@@ -35,7 +36,7 @@ use crate::{
     overlay::{
         address::{Keypair, OverlayAddress},
         message::{GossipMessage, StreamFrame},
-        stream::{OverlayListener, OverlayStream},
+        stream::OverlayStream,
     },
 };
 
@@ -222,10 +223,21 @@ impl OverlayContext {
             inbound_tx,
         );
 
-        // Await listener startup and propagate errors to the caller.
-        lower_factory
-            .start_listener(advertise_addr, peer_tx)
-            .await?;
+        // Create the transport listener and move stream decoding into core.
+        let mut listener = lower_factory.listen(advertise_addr).await?;
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok(stream) => {
+                        let peer_tx = peer_tx.clone();
+                        tokio::spawn(async move {
+                            let _ = process_inbound_stream(stream, peer_tx).await;
+                        });
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
 
         Ok(Self {
             network_id,
@@ -324,6 +336,7 @@ impl OverlayContext {
 
 impl Factory for OverlayContext {
     type Stream = OverlayStream;
+    type Listener = OverlayListener;
     type Address = OverlayAddress;
 
     /// Opens a virtual stream to the node at `addr`.
@@ -363,28 +376,16 @@ impl Factory for OverlayContext {
         Box::pin(async move { Ok(overlay_stream) })
     }
 
-    /// Starts forwarding inbound overlay streams to `peer_tx` as gossip messages.
+    /// Creates a listener for recursive overlays.
     ///
-    /// When `OverlayContext` is used as the lower-layer transport for another
-    /// `OverlayContext` (recursive overlay), this method bridges the inner
-    /// overlay's inbound stream channel to the outer gossip node's peer
-    /// message channel. The `_bind_addr` parameter is ignored because
-    /// addressing is handled at the overlay level.
-    fn start_listener(
+    /// The `_bind_addr` parameter is ignored because addressing is handled at
+    /// the overlay level.
+    fn listen(
         &self,
         _bind_addr: Option<Self::Address>,
-        peer_tx: mpsc::Sender<GossipMessage>,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>> {
-        let mut listener = self.listen();
-        tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let tx = peer_tx.clone();
-                tokio::spawn(async move {
-                    let _ = process_inbound_stream(stream, tx).await;
-                });
-            }
-        });
-        Box::pin(async move { Ok(()) })
+    ) -> Pin<Box<dyn Future<Output = std::io::Result<Self::Listener>> + Send>> {
+        let listener = self.listen();
+        Box::pin(async move { Ok(listener) })
     }
 }
 

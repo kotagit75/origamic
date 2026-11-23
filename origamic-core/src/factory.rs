@@ -6,14 +6,23 @@
 //!
 //! The built-in TCP implementation lives in the `origamic-tcp` crate.
 
-use crate::{overlay::message::GossipMessage, stream::LayerStream};
+use crate::stream::LayerStream;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+
+/// Transport-specific listener for accepted inbound streams.
+///
+/// This abstraction deliberately contains no gossip or overlay protocol types.
+pub trait Listener: Send + Unpin + 'static {
+    type Stream: LayerStream + Send + Unpin + 'static;
+
+    fn accept(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Self::Stream>> + Send + '_>>;
+}
 
 /// Transport abstraction that drives the overlay network.
 ///
@@ -32,6 +41,9 @@ use tokio::sync::mpsc;
 pub trait Factory: Send + Sync + Unpin + 'static {
     /// The bidirectional stream type returned by [`connect`](Factory::connect).
     type Stream: LayerStream + Send + Unpin + 'static;
+
+    /// The listener type used to accept inbound streams.
+    type Listener: Listener<Stream = Self::Stream>;
 
     /// The network address type used to identify peers.
     ///
@@ -59,31 +71,16 @@ pub trait Factory: Send + Sync + Unpin + 'static {
         addr: Self::Address,
     ) -> Pin<Box<dyn Future<Output = std::io::Result<Self::Stream>> + Send>>;
 
-    /// Start accepting inbound connections and forward each new stream to the
-    /// gossip engine via `peer_tx`.
-    ///
-    /// The default implementation is a no-op, which is appropriate for
-    /// client-only or outbound-only transports.
-    ///
-    /// # Parameters
-    ///
-    /// - `bind_addr` – the local address to listen on.  When `None` the
-    ///   implementation should choose a suitable default (or do nothing).
-    /// - `peer_tx` – the channel into which raw [`GossipMessage`] frames
-    ///   decoded from each accepted stream should be sent.
+    /// Create a listener for inbound connections.
     ///
     /// # Errors
     ///
     /// Returns an `std::io::Error` if binding or starting the listener fails
     /// (e.g. the port is already in use).
-    fn start_listener(
+    fn listen(
         &self,
         bind_addr: Option<Self::Address>,
-        peer_tx: mpsc::Sender<GossipMessage>,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>> {
-        let _ = (bind_addr, peer_tx);
-        Box::pin(async move { Ok(()) })
-    }
+    ) -> Pin<Box<dyn Future<Output = io::Result<Self::Listener>> + Send>>;
 }
 
 /// Blanket implementation so that `Arc<F: Factory>` is itself a `Factory`.
@@ -91,6 +88,7 @@ pub trait Factory: Send + Sync + Unpin + 'static {
 /// This allows stacking overlay layers without unwrapping the `Arc`.
 impl<T: ?Sized + Factory> Factory for Arc<T> {
     type Stream = T::Stream;
+    type Listener = T::Listener;
     type Address = T::Address;
 
     fn connect(
@@ -100,11 +98,10 @@ impl<T: ?Sized + Factory> Factory for Arc<T> {
         (**self).connect(addr)
     }
 
-    fn start_listener(
+    fn listen(
         &self,
         bind_addr: Option<Self::Address>,
-        peer_tx: mpsc::Sender<GossipMessage>,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>> {
-        (**self).start_listener(bind_addr, peer_tx)
+    ) -> Pin<Box<dyn Future<Output = io::Result<Self::Listener>> + Send>> {
+        (**self).listen(bind_addr)
     }
 }
