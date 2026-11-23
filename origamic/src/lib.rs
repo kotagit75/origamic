@@ -11,23 +11,22 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use std::{net::SocketAddr, sync::Arc};
-//! use origamic::{core::overlay::context::OverlayContext, tcp::factory::TcpFactory};
+//! use origamic::{
+//!    core::{builder::NetworkBuilder, id::OMNI_NETWORK_ID, overlay::builder::OverlayContextBuilder},
+//!    tcp::factory::TcpFactory,
+//!};
+//!use tokio::io;
 //!
 //! #[tokio::main]
-//! async fn main() -> std::io::Result<()> {
-//!     let addr: SocketAddr = "127.0.0.1:9000".parse().unwrap();
-//!     let ctx = OverlayContext::try_with_advertise(
-//!         uuid::Uuid::new_v4(),
-//!         Arc::new(TcpFactory::new()),
-//!         vec![],
-//!         addr,
-//!     )
-//!     .await?;
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!    let builder = OverlayContextBuilder::new().network_id(OMNI_NETWORK_ID);
+//!    let context = NetworkBuilder::new(TcpFactory::new())
+//!        .overlay(builder)
+//!        .build()
+//!        .await?;
 //!
-//!     println!("Listening at overlay address: {}", ctx.address());
-//!     Ok(())
-//! }
+//!    println!("Listening at overlay address: {}", ctx.address());
+//!}
 //! ```
 
 pub use origamic_core as core;
