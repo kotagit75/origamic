@@ -71,4 +71,5 @@ There are other examples as well.
 - [HTTP Client](examples/example-http-client)
 - [HTTP Server](examples/example-http-server)
 
-## [MIT License](LICENSE)
+## License
+This project is licensed under the [MIT License](LICENSE).
