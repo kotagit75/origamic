@@ -1,3 +1,5 @@
+//! Factory wrapper for applying a decorator to a lower transport.
+
 use std::marker::PhantomData;
 
 use crate::{
@@ -5,12 +7,18 @@ use crate::{
     factory::Factory,
 };
 
+/// Wraps an existing [`Factory`] implementation with a stateless decorator.
+///
+/// `Decorator` preserves the lower factory's address type and listener
+/// behavior. Outgoing and incoming streams are wrapped in
+/// [`DecoratedStream`] values that apply [`Decorate`] at each I/O boundary.
 pub struct Decorator<F: Factory, D: Decorate> {
     inner_factory: F,
     phantom_data: PhantomData<D>,
 }
 
 impl<F: Factory, D: Decorate> Decorator<F, D> {
+    /// Creates a decorator around `inner_factory`.
     pub fn new(inner_factory: F) -> Self {
         Self {
             inner_factory,

@@ -1,3 +1,5 @@
+//! Stream wrapper that applies stateless decoration to read and write operations.
+
 use std::{
     marker::PhantomData,
     pin::Pin,
@@ -8,12 +10,18 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::decorator::decorate::Decorate;
 
+/// Bidirectional transport stream decorated by `D`.
+///
+/// Outgoing writes pass through [`Decorate::from_upper`] and incoming reads
+/// pass through [`Decorate::from_lower`]. All transport behavior other than
+/// byte transformation is delegated to `S`.
 pub struct DecoratedStream<S, D: Decorate> {
     inner: S,
     phantom_data: PhantomData<D>,
 }
 
 impl<S, D: Decorate> DecoratedStream<S, D> {
+    /// Creates a decorated stream around `inner`.
     pub fn new(inner: S) -> Self {
         Self {
             inner,

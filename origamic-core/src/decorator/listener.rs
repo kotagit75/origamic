@@ -1,3 +1,5 @@
+//! Listener wrapper for decorated transport streams.
+
 use std::marker::PhantomData;
 
 use crate::{
@@ -5,12 +7,17 @@ use crate::{
     factory::{Factory, Listener},
 };
 
+/// Listener that wraps streams accepted by an inner factory listener.
+///
+/// Accepted streams retain the lower listener's lifecycle and address
+/// semantics while each stream is exposed as a [`DecoratedStream`].
 pub struct DecoratedListener<F: Factory, D: Decorate> {
     inner: F::Listener,
     phantom_data: PhantomData<D>,
 }
 
 impl<F: Factory, D: Decorate> DecoratedListener<F, D> {
+    /// Creates a decorated listener around `inner`.
     pub fn new(inner: F::Listener) -> Self {
         Self {
             inner,
