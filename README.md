@@ -1,11 +1,11 @@
 <div align="center">
     <h1>Origamic</h1>
-    <p>A self-organizing, decentralized P2P library in Rust for building recursive virtual networks on top of existing networks.</p>
     <p>
         <a href="https://crates.io/crates/origamic"><img src="https://img.shields.io/crates/v/origamic.svg" alt="Crates.io"></a>
         <a href="https://docs.rs/origamic"><img src="https://docs.rs/origamic/badge.svg" alt="Docs.rs"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
     </p>
+    <p>A self-organizing, decentralized P2P library in Rust for building recursive virtual networks on top of existing networks.</p>
 </div>
 
 Origamic is a P2P overlay network library built in Rust.
