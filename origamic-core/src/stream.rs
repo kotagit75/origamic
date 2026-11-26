@@ -8,6 +8,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 /// used as the `Stream` associated type bound in [`Factory`](crate::factory::Factory).
 /// It has a blanket implementation for every type that already implements both
 /// halves, so implementors do not need to write any extra code.
-pub trait LayerStream: AsyncRead + AsyncWrite {}
+pub trait IoStream: AsyncRead + AsyncWrite {}
 
-impl<T> LayerStream for T where T: AsyncRead + AsyncWrite {}
+impl<T> IoStream for T where T: AsyncRead + AsyncWrite {}

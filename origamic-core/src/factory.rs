@@ -6,7 +6,7 @@
 //!
 //! The built-in TCP implementation lives in the `origamic-tcp` crate.
 
-use crate::stream::LayerStream;
+use crate::stream::IoStream;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use std::future::Future;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 ///
 /// This abstraction deliberately contains no gossip or overlay protocol types.
 pub trait Listener: Send + Unpin + 'static {
-    type Stream: LayerStream + Send + Unpin + 'static;
+    type Stream: IoStream + Send + Unpin + 'static;
 
     fn accept(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Self::Stream>> + Send + '_>>;
 }
@@ -40,7 +40,7 @@ pub trait Listener: Send + Unpin + 'static {
 ///   overlay layer).
 pub trait Factory: Send + Sync + Unpin + 'static {
     /// The bidirectional stream type returned by [`connect`](Factory::connect).
-    type Stream: LayerStream + Send + Unpin + 'static;
+    type Stream: IoStream + Send + Unpin + 'static;
 
     /// The listener type used to accept inbound streams.
     type Listener: Listener<Stream = Self::Stream>;
