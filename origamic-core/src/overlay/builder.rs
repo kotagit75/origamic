@@ -38,6 +38,12 @@ pub struct OverlayContextBuilder<F: Factory, LowerFactory> {
     advertise_addr: Option<F::Address>,
 }
 
+impl<F: Factory> Default for OverlayContextBuilder<F, Empty> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<F: Factory> OverlayContextBuilder<F, Empty> {
     /// Creates an empty builder.
     ///
@@ -125,7 +131,7 @@ impl<F: Factory> OverlayContextBuilder<F, Filled> {
     /// start.
     pub async fn build(self) -> std::io::Result<OverlayContext> {
         OverlayContext::try_with_options(
-            self.network_id.unwrap_or_else(|| Uuid::new_v4()),
+            self.network_id.unwrap_or_else(Uuid::new_v4),
             self.keypair.unwrap_or_else(Keypair::generate),
             self.lower_factory.unwrap(),
             self.lower_peers,

@@ -359,10 +359,10 @@ impl<F: ?Sized + Factory> GossipNode<F> {
                     let _ = framed.send(data).await;
                 }
                 let prev = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if prev + 1 == total {
-                    if let Some(tx) = done_tx_shared.lock().await.take() {
-                        let _ = tx.send(());
-                    }
+                if prev + 1 == total
+                    && let Some(tx) = done_tx_shared.lock().await.take()
+                {
+                    let _ = tx.send(());
                 }
             });
         }

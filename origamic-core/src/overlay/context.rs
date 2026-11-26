@@ -226,16 +226,11 @@ impl OverlayContext {
         // Create the transport listener and move stream decoding into core.
         let mut listener = lower_factory.listen(advertise_addr).await?;
         tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok(stream) => {
-                        let peer_tx = peer_tx.clone();
-                        tokio::spawn(async move {
-                            let _ = process_inbound_stream(stream, peer_tx).await;
-                        });
-                    }
-                    Err(_) => break,
-                }
+            while let Ok(stream) = listener.accept().await {
+                let peer_tx = peer_tx.clone();
+                tokio::spawn(async move {
+                    let _ = process_inbound_stream(stream, peer_tx).await;
+                });
             }
         });
 
