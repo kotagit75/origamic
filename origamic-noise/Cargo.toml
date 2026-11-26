@@ -1,0 +1,10 @@
+[package]
+name = "origamic-noise"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+origamic-core.workspace = true
+tokio.workspace = true
+snow.workspace = true
+x25519-dalek.workspace = true
