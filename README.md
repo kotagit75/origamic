@@ -1,6 +1,8 @@
 <div align="center">
     <h1>Origamic</h1>
     <p>
+        <a href="https://github.com/kotagit75/origamic/actions/workflows/test.yaml"><img src="https://github.com/kotagit75/origamic/actions/workflows/test.yaml/badge.svg" alt="Test"></a>
+        <a href="https://github.com/kotagit75/origamic/actions/workflows/lint.yaml"><img src="https://github.com/kotagit75/origamic/actions/workflows/lint.yaml/badge.svg" alt="Lint"></a>
         <a href="https://crates.io/crates/origamic"><img src="https://img.shields.io/crates/v/origamic.svg" alt="Crates.io"></a>
         <a href="https://docs.rs/origamic"><img src="https://docs.rs/origamic/badge.svg" alt="Docs.rs"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
