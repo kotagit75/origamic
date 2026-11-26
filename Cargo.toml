@@ -27,7 +27,7 @@ futures-util = { version = "0.3", features = ["sink"] }
 bytes = "1.12.2"
 snow = "0.10.0"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
-origamic-core = { path = "origamic-core" }
-origamic-tcp = { path = "origamic-tcp" }
-origamic-noise = { path = "origamic-noise" }
-origamic = { path = "origamic" }
+origamic-core = { path = "origamic-core", version = "0.1.0" }
+origamic-tcp = { path = "origamic-tcp", version = "0.1.0" }
+origamic-noise = { path = "origamic-noise", version = "0.1.0" }
+origamic = { path = "origamic", version = "0.1.0" }
