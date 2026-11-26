@@ -56,6 +56,7 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
                 set.insert(peer);
             }
         }
+
         Self {
             peers: Arc::new(RwLock::new(set)),
             self_addr,
@@ -150,5 +151,45 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .contains(addr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excludes_self_and_deduplicates_initial_and_new_peers() {
+        let peers = PeerStore::new(Some(1), [1, 2, 2]);
+
+        assert_eq!(peers.len(), 1);
+        assert!(peers.contains(&2));
+        assert!(!peers.contains(&1));
+        assert!(!peers.add_peer(1));
+        assert!(!peers.add_peer(2));
+        assert!(peers.add_peer(3));
+    }
+
+    #[test]
+    fn capacity_allows_existing_entries_but_rejects_new_ones() {
+        let peers = PeerStore::with_capacity(None, [1, 2], 2);
+
+        assert!(!peers.add_peer(3));
+        assert!(!peers.add_peer(1));
+        assert!(peers.remove_peer(&1));
+        assert!(peers.add_peer(3));
+        assert!(!peers.remove_peer(&1));
+    }
+
+    #[test]
+    fn clones_share_peer_updates_and_sampling_is_bounded() {
+        let peers = PeerStore::with_capacity(None, 0..10, 10);
+        let clone = peers.clone();
+
+        assert!(clone.remove_peer(&5));
+        assert!(!peers.contains(&5));
+        assert_eq!(peers.sample_peers(3).len(), 3);
+        assert_eq!(peers.sample_peers(0).len(), 0);
+        assert_eq!(peers.sample_peers(20).len(), peers.len());
     }
 }

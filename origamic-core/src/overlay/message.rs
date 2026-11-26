@@ -377,3 +377,93 @@ pub enum IncomingMessage {
         payload: Vec<u8>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::SigningKey;
+
+    fn test_keypair() -> SigningKey {
+        SigningKey::from_bytes(&[0x5a; 32])
+    }
+
+    #[test]
+    fn signed_message_round_trips_and_allows_ttl_relay_mutation() {
+        let signing_key = test_keypair();
+        let sender = OverlayAddress::from_verifying_key(&signing_key.verifying_key());
+        let recipient = OverlayAddress::new([0x42; 32]);
+        let mut message = GossipMessage::new_signed(
+            &signing_key,
+            Uuid::from_u128(7),
+            sender,
+            Some(recipient),
+            "message-id".to_owned(),
+            b"payload".to_vec(),
+            4,
+        );
+
+        assert!(message.verify());
+        message.ttl -= 1;
+        assert!(message.verify());
+
+        let decoded = GossipMessage::decode(&message.encode().unwrap()).unwrap();
+        assert_eq!(decoded.id, "message-id");
+        assert_eq!(decoded.sender, sender);
+        assert_eq!(decoded.recipient, Some(recipient));
+        assert_eq!(decoded.payload, b"payload");
+        assert_eq!(decoded.ttl, 3);
+        assert!(decoded.verify());
+    }
+
+    #[test]
+    fn signature_covers_payload_recipient_and_control_flag() {
+        let signing_key = test_keypair();
+        let sender = OverlayAddress::from_verifying_key(&signing_key.verifying_key());
+        let message = GossipMessage::new_broadcast(
+            &signing_key,
+            Uuid::from_u128(9),
+            sender,
+            "signed".to_owned(),
+            b"original".to_vec(),
+            5,
+        );
+
+        let mut changed_payload = message.clone();
+        changed_payload.payload[0] ^= 1;
+        assert!(!changed_payload.verify());
+
+        let mut changed_recipient = message.clone();
+        changed_recipient.recipient = Some(OverlayAddress::new([0x33; 32]));
+        assert!(!changed_recipient.verify());
+
+        let mut changed_control = message;
+        changed_control.is_control = true;
+        assert!(!changed_control.verify());
+    }
+
+    #[test]
+    fn pex_and_stream_frames_round_trip_and_decode_rejects_invalid_bytes() {
+        let pex = PeerExchangePayload::new(
+            Some("127.0.0.1:42".to_owned()),
+            vec!["127.0.0.1:43".to_owned()],
+        );
+        let decoded = PeerExchangePayload::<String>::decode(&pex.encode().unwrap()).unwrap();
+        assert_eq!(decoded.listen_addr.as_deref(), Some("127.0.0.1:42"));
+        assert_eq!(decoded.known_peers, ["127.0.0.1:43"]);
+
+        let init = StreamFrame::new_init(13, b"first".to_vec());
+        let decoded = StreamFrame::decode(&init.encode().unwrap()).unwrap();
+        assert!(decoded.is_init);
+        assert!(!decoded.is_close);
+        assert_eq!(decoded.stream_id, 13);
+        assert_eq!(decoded.data, b"first");
+
+        let close = StreamFrame::new_close(13);
+        let decoded = StreamFrame::decode(&close.encode().unwrap()).unwrap();
+        assert!(decoded.is_close);
+        assert!(decoded.data.is_empty());
+
+        assert!(GossipMessage::decode(&[0xff]).is_err());
+        assert!(StreamFrame::decode(&[0xff]).is_err());
+    }
+}

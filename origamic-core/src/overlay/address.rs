@@ -169,3 +169,43 @@ impl Keypair {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_address_round_trips_as_hex_and_keypair_address() {
+        let keypair = Keypair::generate();
+        let address = keypair.address;
+
+        assert_eq!(
+            OverlayAddress::from_verifying_key(&keypair.signing_key.verifying_key()),
+            address
+        );
+        assert_eq!(address.to_hex().parse::<OverlayAddress>().unwrap(), address);
+        assert_eq!(address.as_bytes(), &address.0);
+        assert_eq!(address.to_string(), address.to_hex());
+        assert!(format!("{address:?}").starts_with("OverlayAddress("));
+    }
+
+    #[test]
+    fn overlay_address_reports_invalid_length_and_hex() {
+        assert_eq!(
+            OverlayAddress::from_hex("abcd").unwrap_err(),
+            AddressParseError::InvalidLength {
+                expected: 64,
+                actual: 4
+            }
+        );
+
+        let invalid = format!("{}z{}", "0".repeat(12), "0".repeat(51));
+        assert_eq!(
+            OverlayAddress::from_hex(&invalid).unwrap_err(),
+            AddressParseError::InvalidHex {
+                index: 12,
+                character: 'z'
+            }
+        );
+    }
+}

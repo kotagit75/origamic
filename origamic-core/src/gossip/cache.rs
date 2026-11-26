@@ -93,3 +93,31 @@ impl SeenCache {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_and_insert_rejects_duplicates_until_capacity_eviction() {
+        let mut cache = SeenCache::new(Duration::from_secs(60), 2);
+
+        assert!(cache.check_and_insert("first"));
+        assert!(!cache.check_and_insert("first"));
+        assert!(cache.check_and_insert("second"));
+        assert!(cache.check_and_insert("third"));
+        assert!(!cache.contains("first"));
+        assert!(cache.contains("second"));
+        assert!(cache.contains("third"));
+        assert!(cache.check_and_insert("first"));
+    }
+
+    #[test]
+    fn expired_entries_are_removed_before_duplicate_check() {
+        let mut cache = SeenCache::new(Duration::ZERO, 4);
+
+        assert!(cache.check_and_insert("message"));
+        std::thread::sleep(Duration::from_millis(1));
+        assert!(cache.check_and_insert("message"));
+    }
+}
