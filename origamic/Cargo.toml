@@ -1,7 +1,12 @@
 [package]
 name = "origamic"
-edition = "2024"
 version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+readme.workspace = true
 
 [dependencies]
 origamic-core.workspace = true

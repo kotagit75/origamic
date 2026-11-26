@@ -1,7 +1,12 @@
 [package]
 name = "origamic-core"
+edition.workspace = true
 version.workspace = true
-edition = "2024"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The core routing, gossip engine, and overlay network abstractions for the Origamic P2P library."
+readme = "README.md"
 
 [dependencies]
 tokio = { workspace = true, features = ["full"] }

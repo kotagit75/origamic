@@ -1,7 +1,12 @@
 [package]
 name = "origamic-noise"
-edition = "2024"
+edition.workspace = true
 version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Experimental Noise protocol encryption layer for the Origamic P2P library."
+readme = "README.md"
 
 [dependencies]
 origamic-core.workspace = true

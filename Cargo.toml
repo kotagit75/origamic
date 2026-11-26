@@ -5,7 +5,14 @@ members = [
 ]
 
 [workspace.package]
+edition = "2024"
 version = "0.1.0"
+description = "A self-organizing, decentralized P2P library in Rust for building recursive virtual networks."
+authors = ["yuzu_mikan <unity75lets5@gmail.com>"]
+repository = "https://github.com/kotagit75/origamic"
+homepage = "https://github.com/kotagit75/origamic"
+readme = "README.md"
+license = "MIT"
 
 [workspace.dependencies]
 tokio = { version = "1.53.3", features = ["full"] }

@@ -1,7 +1,12 @@
 [package]
 name = "origamic-tcp"
-edition = "2024"
+edition.workspace = true
 version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "TCP transport implementation for the Origamic P2P library."
+readme = "README.md"
 
 [dependencies]
 origamic-core.workspace = true
