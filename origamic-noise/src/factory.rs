@@ -486,4 +486,60 @@ mod tests {
         let error = read_record(&mut server).await.unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
     }
+
+    #[test]
+    fn identity_derivation_is_stable_for_the_same_private_key() {
+        let private_key = [0x24; 32];
+        let first = NoiseIdentity::from_private(private_key);
+        let second = NoiseIdentity::from_private(private_key);
+
+        assert_eq!(first.public_key(), second.public_key());
+        assert_ne!(first.public_key(), [0; 32]);
+    }
+
+    #[test]
+    fn pinned_keys_requires_an_exact_match() {
+        let trusted_key = [0x42; 32];
+        let verifier = PinnedKeys::new([trusted_key]);
+
+        assert!(verifier.verify(&trusted_key));
+        assert!(!verifier.verify(&[0x24; 32]));
+        assert!(!verifier.verify(&trusted_key[..31]));
+    }
+
+    #[test]
+    fn accept_new_allows_reconnecting_with_an_observed_key() {
+        let verifier = AcceptNew::new();
+        let remote_key = [0x42; 32];
+
+        assert!(verifier.verify(&remote_key));
+        assert!(verifier.verify(&remote_key));
+        assert!(!verifier.verify(&remote_key[..31]));
+    }
+
+    #[tokio::test]
+    async fn handshake_rejects_different_prologues() {
+        let initiator_config = NoiseConfig::new(NoiseIdentity::generate().unwrap())
+            .with_prologue(b"initiator context".to_vec());
+        let responder_config = NoiseConfig::new(NoiseIdentity::generate().unwrap())
+            .with_prologue(b"responder context".to_vec());
+        let (initiator_lower, responder_lower) = duplex(1024 * 1024);
+
+        let initiator = tokio::spawn(async move {
+            perform_initiator_handshake(initiator_lower, &initiator_config).await
+        });
+        let responder = tokio::spawn(async move {
+            perform_responder_handshake(responder_lower, &responder_config).await
+        });
+
+        let initiator_result = tokio::time::timeout(std::time::Duration::from_secs(2), initiator)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            initiator_result.err().unwrap().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        responder.abort();
+    }
 }
