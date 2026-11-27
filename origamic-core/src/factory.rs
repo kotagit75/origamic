@@ -20,8 +20,17 @@ use std::sync::Arc;
 /// This abstraction deliberately contains no gossip or overlay protocol types.
 pub trait Listener: Send + Unpin + 'static {
     type Stream: IoStream + Send + Unpin + 'static;
+    /// Address type accepted by the corresponding factory's `connect` method.
+    type Address;
 
-    fn accept(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Self::Stream>> + Send + '_>>;
+    /// Accepts an inbound stream and optionally returns a dial-back address.
+    ///
+    /// `Some(address)` must be an address that can be passed to the matching
+    /// factory's `connect` method to reach the remote peer. Return `None` when
+    /// the observed transport endpoint is not a reusable peer address.
+    fn accept(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = io::Result<(Self::Stream, Option<Self::Address>)>> + Send + '_>>;
 }
 
 /// Transport abstraction that drives the overlay network.
@@ -43,7 +52,7 @@ pub trait Factory: Send + Sync + Unpin + 'static {
     type Stream: IoStream + Send + Unpin + 'static;
 
     /// The listener type used to accept inbound streams.
-    type Listener: Listener<Stream = Self::Stream>;
+    type Listener: Listener<Stream = Self::Stream, Address = Self::Address>;
 
     /// The network address type used to identify peers.
     ///

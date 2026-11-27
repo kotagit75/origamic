@@ -30,6 +30,7 @@
 pub mod builder;
 pub mod codec;
 pub mod decorator;
+pub mod discovery;
 pub mod error;
 pub mod factory;
 pub mod gossip;

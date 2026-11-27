@@ -77,18 +77,29 @@ struct MemoryListener {
 
 impl Listener for MemoryListener {
     type Stream = RecordingStream;
+    type Address = ();
 
     fn accept(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<Self::Stream>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::io::Result<(Self::Stream, Option<Self::Address>)>> + Send + '_,
+        >,
+    > {
         let incoming_rx = self.incoming_rx.clone();
         Box::pin(async move {
-            incoming_rx.lock().await.recv().await.ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "test listener has been closed",
-                )
-            })
+            incoming_rx
+                .lock()
+                .await
+                .recv()
+                .await
+                .map(|stream| (stream, None))
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "test listener has been closed",
+                    )
+                })
         })
     }
 }
@@ -160,7 +171,7 @@ async fn factory_connect_and_accept_exchange_encrypted_stream_data() {
 
     let (client_result, server_result) = tokio::join!(client.connect(()), listener.accept());
     let mut client_stream = client_result.unwrap();
-    let mut server_stream = server_result.unwrap();
+    let (mut server_stream, _) = server_result.unwrap();
 
     assert_eq!(
         client_stream.remote_static_key(),

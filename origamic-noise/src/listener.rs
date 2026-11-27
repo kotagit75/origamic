@@ -27,15 +27,21 @@ impl<F: Factory> NoiseListener<F> {
 
 impl<F: Factory> Listener for NoiseListener<F> {
     type Stream = NoiseStream<F::Stream>;
+    type Address = F::Address;
 
     fn accept(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<Self::Stream>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::io::Result<(Self::Stream, Option<Self::Address>)>> + Send + '_,
+        >,
+    > {
         let accept = self.inner.accept();
         let config = self.config.clone();
         Box::pin(async move {
-            let lower = accept.await?;
-            perform_responder_handshake(lower, &config).await
+            let (lower, address) = accept.await?;
+            let stream = perform_responder_handshake(lower, &config).await?;
+            Ok((stream, address))
         })
     }
 }

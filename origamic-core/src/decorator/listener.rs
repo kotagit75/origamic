@@ -28,10 +28,18 @@ impl<F: Factory, D: Decorate> DecoratedListener<F, D> {
 
 impl<F: Factory, D: Decorate> Listener for DecoratedListener<F, D> {
     type Stream = DecoratedStream<F::Stream, D>;
+    type Address = F::Address;
 
     fn accept(
         &mut self,
-    ) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<Self::Stream>> + Send + '_>> {
-        Box::pin(async move { Ok(DecoratedStream::new(self.inner.accept().await?)) })
+    ) -> std::pin::Pin<
+        Box<
+            dyn Future<Output = std::io::Result<(Self::Stream, Option<Self::Address>)>> + Send + '_,
+        >,
+    > {
+        Box::pin(async move {
+            let (stream, address) = self.inner.accept().await?;
+            Ok((DecoratedStream::new(stream), address))
+        })
     }
 }

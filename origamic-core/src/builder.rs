@@ -1,4 +1,5 @@
 use crate::{
+    discovery::PeerDiscovery,
     factory::Factory,
     overlay::{
         builder::{Empty, OverlayContextBuilder},
@@ -61,5 +62,41 @@ impl<A: Factory + Send, F: Future<Output = Result<A>> + Send> NetworkBuilder<F> 
     /// Runs all configured stages and returns the final factory or an error.
     pub async fn build(self) -> F::Output {
         self.future.await
+    }
+}
+
+impl<
+    Addr: Send + Sync,
+    A: Factory<Address = Addr> + PeerDiscovery<Address = Addr> + Send + Clone,
+    F: Future<Output = Result<A>> + Send,
+> NetworkBuilder<F>
+{
+    /// Adds an overlay that discovers peers from the preceding overlay layer.
+    ///
+    /// The factory produced by the previous stage is used both as the new
+    /// overlay's lower transport and as its [`PeerDiscovery`] provider. Known
+    /// peers are added during initialization, and peers discovered later are
+    /// added as updates arrive. The transport and discovery address types must
+    /// match.
+    ///
+    /// This is useful when stacking overlays: the new layer can use peers
+    /// already known to the lower [`OverlayContext`] without configuring them
+    /// again in `builder`.
+    ///
+    /// # Errors
+    ///
+    /// The error from a previous builder stage or from creating the overlay
+    /// context is propagated by [`build`](Self::build).
+    pub fn overlay_with_peer_discovery(
+        self,
+        builder: OverlayContextBuilder<A, Empty>,
+    ) -> NetworkBuilder<impl Future<Output = Result<OverlayContext>> + Send> {
+        self.layer(async |lower| {
+            builder
+                .peer_discovery(Arc::new(lower.clone()))
+                .lower_factory(Arc::new(lower))
+                .build()
+                .await
+        })
     }
 }

@@ -103,6 +103,8 @@ pub struct GossipNodeHandle<F: ?Sized + Factory> {
     /// Shared peer address store.  The upper layer can call
     /// [`PeerStore::add_peer`] to seed the initial peer set.
     pub peer_store: PeerStore<F::Address>,
+    /// Authenticated identities observed on this overlay network.
+    pub overlay_peer_store: PeerStore<OverlayAddress>,
 }
 
 /// The gossip node event loop.
@@ -118,6 +120,8 @@ pub struct GossipNode<F: ?Sized + Factory> {
     pub lower_factory: Arc<F>,
     /// Set of known lower-layer peer addresses.
     pub peer_store: PeerStore<F::Address>,
+    /// Authenticated identities observed on this overlay network.
+    pub overlay_peer_store: PeerStore<OverlayAddress>,
     /// Deduplication cache that prevents re-processing the same message.
     pub cache: SeenCache,
     /// Receives messages from the local application via [`OutgoingLocalMessage`].
@@ -164,12 +168,14 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         let (upper_tx, upper_rx) = mpsc::channel(buffer_size);
 
         let peer_store = PeerStore::new(advertise_addr, lower_peers);
+        let overlay_peer_store = PeerStore::new(Some(address), []);
 
         let node = Self {
             network_id,
             keypair,
             lower_factory: Arc::clone(&lower_factory),
             peer_store: peer_store.clone(),
+            overlay_peer_store: overlay_peer_store.clone(),
             cache: SeenCache::with_default(),
             local_rx,
             peer_rx,
@@ -186,6 +192,7 @@ impl<F: ?Sized + Factory> GossipNode<F> {
             upper_rx,
             peer_tx,
             peer_store,
+            overlay_peer_store,
         }
     }
 
@@ -260,6 +267,10 @@ impl<F: ?Sized + Factory> GossipNode<F> {
         // 2. Deduplication
         if !self.cache.check_and_insert(&msg.id) {
             return;
+        }
+
+        if msg.network_id == self.network_id {
+            self.overlay_peer_store.add_peer(msg.sender);
         }
 
         // 3. Control messages (PEX)

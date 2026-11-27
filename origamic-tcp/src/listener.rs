@@ -22,13 +22,23 @@ impl TcpListenerAdapter {
 
 impl Listener for TcpListenerAdapter {
     type Stream = TcpStream;
+    type Address = SocketAddr;
 
     fn accept(
         &mut self,
-    ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<Self::Stream>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn std::future::Future<Output = std::io::Result<(Self::Stream, Option<Self::Address>)>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             match &self.listener {
-                Some(listener) => Ok(listener.accept().await?.0),
+                Some(listener) => {
+                    let (stream, _remote_addr) = listener.accept().await?;
+                    Ok((stream, None))
+                }
                 None => std::future::pending().await,
             }
         })

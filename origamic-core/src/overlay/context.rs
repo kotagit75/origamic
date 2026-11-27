@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use crate::overlay::listener::OverlayListener;
 use crate::{
+    discovery::PeerDiscovery,
     error::SendError,
     factory::{Factory, Listener},
     gossip::{
@@ -96,6 +97,7 @@ pub struct OverlayContext {
     pub(crate) local_tx: mpsc::Sender<OutgoingLocalMessage>,
     pub(crate) active_streams: Arc<Mutex<ActiveStreamMap>>,
     pub(crate) inbound_stream_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream, OverlayAddress)>>>,
+    overlay_peers: PeerStore<OverlayAddress>,
 }
 
 impl std::fmt::Debug for OverlayContext {
@@ -194,6 +196,37 @@ impl OverlayContext {
         lower_peers: Vec<F::Address>,
         advertise_addr: Option<F::Address>,
     ) -> std::io::Result<Self> {
+        Self::try_with_options_and_discovery(
+            network_id,
+            keypair,
+            lower_factory,
+            lower_peers,
+            advertise_addr,
+            None,
+        )
+        .await
+    }
+
+    /// Creates an overlay with peers supplied by a separate discovery provider.
+    ///
+    /// Subscribes to peer updates before taking the provider's initial snapshot,
+    /// then adds both initial and newly discovered addresses to the gossip peer
+    /// table. The provider's address type must match `lower_factory`'s address
+    /// type. Existing `lower_peers` are preserved and combined with discovered
+    /// peers. Peers remain in the table after failed sends and may be retried
+    /// by subsequent gossip traffic.
+    pub async fn try_with_options_and_discovery<F: Factory>(
+        network_id: Uuid,
+        keypair: Keypair,
+        lower_factory: Arc<F>,
+        lower_peers: Vec<F::Address>,
+        advertise_addr: Option<F::Address>,
+        peer_discovery: Option<Arc<dyn PeerDiscovery<Address = F::Address>>>,
+    ) -> std::io::Result<Self> {
+        let discovery_subscription = peer_discovery
+            .as_ref()
+            .map(|discovery| (discovery.clone(), discovery.subscribe_peers()));
+
         let address = keypair.address;
         let GossipNodeHandle {
             address: _,
@@ -202,6 +235,7 @@ impl OverlayContext {
             upper_rx,
             peer_tx,
             peer_store,
+            overlay_peer_store,
         } = GossipNode::spawn(
             network_id,
             keypair.clone(),
@@ -211,6 +245,24 @@ impl OverlayContext {
             DEFAULT_GOSSIP_TTL,
             DEFAULT_GOSSIP_BUFFER_SIZE,
         );
+
+        if let Some((discovery, mut updates)) = discovery_subscription {
+            peer_store.add_peers(discovery.known_peers());
+            let peer_store = peer_store.clone();
+            tokio::spawn(async move {
+                loop {
+                    match updates.recv().await {
+                        Ok(peer) => {
+                            peer_store.add_peer(peer);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            peer_store.add_peers(discovery.known_peers());
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+        }
 
         let active_streams: Arc<Mutex<ActiveStreamMap>> = Arc::new(Mutex::new(HashMap::new()));
         let (inbound_tx, inbound_rx) = mpsc::channel(128);
@@ -225,8 +277,12 @@ impl OverlayContext {
 
         // Create the transport listener and move stream decoding into core.
         let mut listener = lower_factory.listen(advertise_addr).await?;
+        let listener_peer_store = peer_store.clone();
         tokio::spawn(async move {
-            while let Ok(stream) = listener.accept().await {
+            while let Ok((stream, peer_addr)) = listener.accept().await {
+                if let Some(peer_addr) = peer_addr {
+                    listener_peer_store.add_peer(peer_addr);
+                }
                 let peer_tx = peer_tx.clone();
                 tokio::spawn(async move {
                     let _ = process_inbound_stream(stream, peer_tx).await;
@@ -241,6 +297,7 @@ impl OverlayContext {
             local_tx,
             active_streams,
             inbound_stream_rx: Arc::new(Mutex::new(inbound_rx)),
+            overlay_peers: overlay_peer_store,
         })
     }
 
@@ -326,6 +383,18 @@ impl OverlayContext {
             .send(OutgoingLocalMessage::to(recipient, payload))
             .await
             .map_err(|_| SendError::ChannelClosed)
+    }
+}
+
+impl PeerDiscovery for OverlayContext {
+    type Address = OverlayAddress;
+
+    fn known_peers(&self) -> Vec<Self::Address> {
+        self.overlay_peers.get_peers()
+    }
+
+    fn subscribe_peers(&self) -> tokio::sync::broadcast::Receiver<Self::Address> {
+        self.overlay_peers.subscribe()
     }
 }
 

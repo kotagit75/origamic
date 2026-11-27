@@ -59,13 +59,18 @@ impl OverlayListener {
 
 impl Listener for OverlayListener {
     type Stream = OverlayStream;
+    type Address = OverlayAddress;
 
     fn accept(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<Self::Stream>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::io::Result<(Self::Stream, Option<Self::Address>)>> + Send + '_,
+        >,
+    > {
         Box::pin(async move {
-            let (stream, _) = self.accept().await?;
-            Ok(stream)
+            let (stream, peer) = OverlayListener::accept(self).await?;
+            Ok((stream, Some(peer)))
         })
     }
 }

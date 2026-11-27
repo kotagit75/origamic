@@ -8,6 +8,7 @@ use rand::seq::SliceRandom;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
+use tokio::sync::broadcast;
 
 /// A thread-safe, bounded store of peer addresses.
 ///
@@ -19,6 +20,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Clone, Debug)]
 pub struct PeerStore<A: Clone + Eq + Hash + Send + Sync + 'static> {
     peers: Arc<RwLock<HashSet<A>>>,
+    updates: broadcast::Sender<A>,
     self_addr: Option<A>,
     max_peers: usize,
 }
@@ -56,9 +58,11 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
                 set.insert(peer);
             }
         }
+        let (updates, _) = broadcast::channel(256);
 
         Self {
             peers: Arc::new(RwLock::new(set)),
+            updates,
             self_addr,
             max_peers,
         }
@@ -83,7 +87,20 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
         if lock.len() >= self.max_peers && !lock.contains(&addr) {
             return false;
         }
-        lock.insert(addr)
+        let inserted = lock.insert(addr.clone());
+        drop(lock);
+        if inserted {
+            let _ = self.updates.send(addr);
+        }
+        inserted
+    }
+
+    /// Subscribes to peer addresses newly inserted after this call.
+    ///
+    /// Subscribe before taking a snapshot with [`get_peers`](Self::get_peers)
+    /// to avoid missing updates that happen during initialization.
+    pub fn subscribe(&self) -> broadcast::Receiver<A> {
+        self.updates.subscribe()
     }
 
     /// Inserts multiple peer addresses and returns the number newly added.
@@ -185,11 +202,15 @@ mod tests {
     fn clones_share_peer_updates_and_sampling_is_bounded() {
         let peers = PeerStore::with_capacity(None, 0..10, 10);
         let clone = peers.clone();
+        let mut updates = peers.subscribe();
 
         assert!(clone.remove_peer(&5));
         assert!(!peers.contains(&5));
         assert_eq!(peers.sample_peers(3).len(), 3);
         assert_eq!(peers.sample_peers(0).len(), 0);
         assert_eq!(peers.sample_peers(20).len(), peers.len());
+
+        assert!(peers.add_peer(11));
+        assert_eq!(updates.try_recv().unwrap(), 11);
     }
 }
