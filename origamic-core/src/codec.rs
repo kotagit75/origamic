@@ -6,12 +6,20 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
+/// Adapts a framed byte codec to Tokio's [`AsyncRead`] and [`AsyncWrite`] traits.
+///
+/// Each decoded frame is exposed as a byte stream. If a frame is larger than
+/// the caller's read buffer, the unconsumed bytes are retained for subsequent
+/// reads. Writes are encoded as individual frames; callers should flush when
+/// buffered frames need to be sent to the underlying stream.
 pub struct CodecStream<S, C> {
+    /// The underlying framed transport and its codec.
     pub framed: Framed<S, C>,
     leftover: BytesMut,
 }
 
 impl<S, C> CodecStream<S, C> {
+    /// Wraps `inner` with `codec` and initializes an empty read buffer.
     pub fn new_codec(inner: S, codec: C) -> Self {
         Self {
             framed: Framed::new(inner, codec),

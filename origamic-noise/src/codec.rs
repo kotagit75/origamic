@@ -4,11 +4,18 @@ use tokio_util::{
     codec::{Decoder, Encoder},
 };
 
+/// Encodes byte chunks as encrypted Noise transport records.
+///
+/// Each record is prefixed by its encrypted length as a two-byte
+/// big-endian integer. Decoding validates complete records and returns their
+/// decrypted contents; malformed or unauthenticated records produce an I/O
+/// error with kind [`InvalidData`](io::ErrorKind::InvalidData).
 pub struct NoiseCodec {
     pub(crate) transport: snow::TransportState,
 }
 
 impl NoiseCodec {
+    /// Creates a codec backed by an established Noise transport state.
     pub fn new(transport: snow::TransportState) -> Self {
         Self { transport }
     }
