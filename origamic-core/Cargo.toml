@@ -16,6 +16,7 @@ rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 bincode = { workspace = true }
 tokio-util = { workspace = true, features = ["codec"] }
+futures = { workspace = true }
 futures-util = { workspace = true, features = ["sink"] }
 bytes = { workspace = true }
 thiserror = { workspace = true }

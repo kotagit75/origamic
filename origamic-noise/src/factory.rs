@@ -7,7 +7,10 @@ use snow::{Builder, params::NoiseParams};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::{listener::NoiseListener, stream::NoiseStream};
+use crate::{
+    listener::NoiseListener,
+    stream::{NoiseStream, NoiseStreamExt},
+};
 
 /// Noise protocol suite used by this transport.
 ///

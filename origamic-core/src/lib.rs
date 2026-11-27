@@ -28,6 +28,7 @@
 //! [`factory::Factory`] can be used as the underlying carrier.
 
 pub mod builder;
+pub mod codec;
 pub mod decorator;
 pub mod error;
 pub mod factory;

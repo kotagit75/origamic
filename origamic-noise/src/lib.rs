@@ -31,6 +31,7 @@
 //!
 //! [`OverlayAddress`]: origamic_core::overlay::address::OverlayAddress
 
+pub mod codec;
 pub mod factory;
 pub mod listener;
 pub mod stream;

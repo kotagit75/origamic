@@ -11,5 +11,6 @@ readme = "README.md"
 [dependencies]
 origamic-core.workspace = true
 tokio.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
 snow.workspace = true
 x25519-dalek.workspace = true

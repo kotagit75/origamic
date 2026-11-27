@@ -6,7 +6,9 @@ use std::{
 };
 
 use origamic_core::factory::{Factory, Listener};
-use origamic_noise::{NoiseConfig, NoiseFactory, NoiseIdentity, PinnedKeys};
+use origamic_noise::{
+    NoiseConfig, NoiseFactory, NoiseIdentity, PinnedKeys, stream::NoiseStreamExt,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf, duplex},
     sync::{Mutex, mpsc},
@@ -171,12 +173,14 @@ async fn factory_connect_and_accept_exchange_encrypted_stream_data() {
 
     let client_message = b"client plaintext that must stay private";
     client_stream.write_all(client_message).await.unwrap();
+    client_stream.flush().await.unwrap();
     let mut received = vec![0; client_message.len()];
     server_stream.read_exact(&mut received).await.unwrap();
     assert_eq!(received, client_message);
 
     let server_message = b"server plaintext that must stay private";
     server_stream.write_all(server_message).await.unwrap();
+    server_stream.flush().await.unwrap();
     let mut received = vec![0; server_message.len()];
     client_stream.read_exact(&mut received).await.unwrap();
     assert_eq!(received, server_message);
