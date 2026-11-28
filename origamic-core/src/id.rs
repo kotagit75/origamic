@@ -11,4 +11,3 @@ use uuid::Uuid;
 /// Its canonical textual representation is
 /// `00000000-0000-0000-0000-000000000000`.
 pub const OMNI_NETWORK_ID: Uuid = Uuid::nil();
-pub const OMNI2_NETWORK_ID: Uuid = Uuid::max();
