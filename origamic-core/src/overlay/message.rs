@@ -9,7 +9,7 @@
 //! - [`StreamFrame`] – a multiplexed virtual-stream chunk embedded in a
 //!   gossip message payload.
 //!
-//! All types support bincode serialisation via [`encode`] / [`decode`] helpers
+//! All types support postcard serialisation via [`encode`] / [`decode`] helpers
 //! that return [`ProtocolError`] on failure.
 //!
 //! [`encode`]: GossipMessage::encode
@@ -119,7 +119,7 @@ impl GossipMessage {
             recipient,
             payload,
             ttl,
-            signature: signature.to_vec(),
+            signature: signature.to_bytes().to_vec(),
             is_control,
         }
     }
@@ -211,13 +211,13 @@ impl GossipMessage {
         verifying_key.verify(&digest, &signature).is_ok()
     }
 
-    /// Serialises the message to bytes using bincode.
+    /// Serialises the message to bytes using postcard.
     ///
     /// # Errors
     ///
     /// Returns [`ProtocolError::Serialization`] if serialisation fails.
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-        bincode::serialize(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
+        postcard::to_allocvec(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
     }
 
     /// Deserialises a `GossipMessage` from a byte slice.
@@ -226,7 +226,7 @@ impl GossipMessage {
     ///
     /// Returns [`ProtocolError::Deserialization`] if deserialisation fails.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        bincode::deserialize(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
+        postcard::from_bytes(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
     }
 }
 
@@ -254,13 +254,13 @@ impl<A: Serialize + serde::de::DeserializeOwned> PeerExchangePayload<A> {
         }
     }
 
-    /// Serialises the payload to bytes using bincode.
+    /// Serialises the payload to bytes using postcard.
     ///
     /// # Errors
     ///
     /// Returns [`ProtocolError::Serialization`] if serialisation fails.
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-        bincode::serialize(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
+        postcard::to_allocvec(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
     }
 
     /// Deserialises a `PeerExchangePayload` from a byte slice.
@@ -269,7 +269,7 @@ impl<A: Serialize + serde::de::DeserializeOwned> PeerExchangePayload<A> {
     ///
     /// Returns [`ProtocolError::Deserialization`] if deserialisation fails.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        bincode::deserialize(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
+        postcard::from_bytes(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
     }
 }
 
@@ -332,13 +332,13 @@ impl StreamFrame {
         }
     }
 
-    /// Serialises the frame to bytes using bincode.
+    /// Serialises the frame to bytes using postcard.
     ///
     /// # Errors
     ///
     /// Returns [`ProtocolError::Serialization`] if serialisation fails.
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-        bincode::serialize(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
+        postcard::to_allocvec(self).map_err(|e| ProtocolError::Serialization(e.to_string()))
     }
 
     /// Deserialises a `StreamFrame` from a byte slice.
@@ -347,7 +347,7 @@ impl StreamFrame {
     ///
     /// Returns [`ProtocolError::Deserialization`] if deserialisation fails.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        bincode::deserialize(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
+        postcard::from_bytes(bytes).map_err(|e| ProtocolError::Deserialization(e.to_string()))
     }
 }
 

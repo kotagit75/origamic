@@ -14,7 +14,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 ed25519-dalek = { workspace = true, features = ["rand_core"] }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-bincode = { workspace = true }
+postcard = { workspace = true, features = ["alloc"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
 futures-util = { workspace = true, features = ["sink"] }

@@ -6,7 +6,6 @@
 //! signing gossip messages.
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -149,8 +148,8 @@ pub struct Keypair {
 impl Keypair {
     /// Generates a fresh `Keypair` using the OS cryptographic RNG.
     pub fn generate() -> Self {
-        let mut csprng = OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
+        let mut rng = rand::rng();
+        let signing_key = SigningKey::generate(&mut rng);
         let address = OverlayAddress::from_verifying_key(&signing_key.verifying_key());
         Self {
             signing_key,

@@ -4,7 +4,7 @@
 //! communicates with. It is safe to clone and share across threads because all
 //! interior state is protected by an `Arc<RwLock<_>>`.
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
@@ -145,8 +145,8 @@ impl<A: Clone + Eq + Hash + Send + Sync + 'static> PeerStore<A> {
         if peers.len() <= limit {
             return peers;
         }
-        let mut rng = rand::thread_rng();
-        peers.choose_multiple(&mut rng, limit).cloned().collect()
+        let mut rng = rand::rng();
+        peers.sample(&mut rng, limit).cloned().collect()
     }
 
     /// Returns the current number of stored peers.

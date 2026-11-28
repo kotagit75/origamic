@@ -15,19 +15,19 @@ readme = "README.md"
 license = "MIT"
 
 [workspace.dependencies]
-tokio = { version = "1.53.3", features = ["full"] }
+tokio = { version = "1.53.3", features = ["full", "io-util", "bytes"] }
 uuid = { version = "1.28.0", features = ["v4", "serde"] }
-ed25519-dalek = { version = "2.1", features = ["rand_core"] }
-rand = "0.8"
+ed25519-dalek = { version = "3.0.0", features = ["rand_core"] }
+rand = "0.10.4"
 serde = { version = "1.0", features = ["derive"] }
-bincode = "1.3"
+postcard = "1.2.0"
 thiserror = "2.0"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3.34"
 futures-util = { version = "0.3", features = ["sink"] }
-bytes = "1.12.2"
+bytes = "1"
 snow = "0.10.0"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 origamic-core = { path = "origamic-core", version = "0.1.0" }
 origamic-tcp = { path = "origamic-tcp", version = "0.1.0" }
 origamic-noise = { path = "origamic-noise", version = "0.1.0" }

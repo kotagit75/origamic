@@ -72,11 +72,11 @@ pub enum AddressParseError {
 /// [`PeerExchangePayload`](crate::overlay::message::PeerExchangePayload).
 #[derive(Error, Debug)]
 pub enum ProtocolError {
-    /// `bincode` serialization of an outgoing message failed.
+    /// `postcard` serialization of an outgoing message failed.
     #[error("Serialization failed: {0}")]
     Serialization(String),
 
-    /// `bincode` deserialization of received bytes failed – the data was malformed
+    /// `postcard` deserialization of received bytes failed – the data was malformed
     /// or the buffer was truncated.
     #[error("Deserialization failed: {0}")]
     Deserialization(String),
@@ -92,8 +92,8 @@ pub enum ProtocolError {
     InvalidFrame(String),
 }
 
-impl From<bincode::Error> for ProtocolError {
-    fn from(err: bincode::Error) -> Self {
+impl From<postcard::Error> for ProtocolError {
+    fn from(err: postcard::Error) -> Self {
         ProtocolError::Deserialization(err.to_string())
     }
 }
